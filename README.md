@@ -43,17 +43,19 @@ The dummy service intentionally includes code smells, security hotspots and a vu
 1. Create a project in Linear (for example: Quality and Security POC)
 2. Create optional labels: `sonarcloud`, `snyk`, `security`
 3. Generate a Personal API Key in Settings → API
-4. Get your Team ID:
+4. Get your Team ID (UUID) or team key:
 
 ```bash
 curl -X POST https://api.linear.app/graphql \
   -H "Authorization: <LINEAR_API_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"query":"{ teams { nodes { id name } } }"}'
+  -d '{"query":"{ teams { nodes { id key name } } }"}'
 ```
 
+Use the team `id` (UUID), team `key` (short code like `ENG`), or a project `name` (e.g. `Projects_BR`). The issue will be created in the project's team. Do not confuse project ID with team ID.
+
 5. Add GitHub secret `LINEAR_API_KEY`
-6. Add GitHub variable `LINEAR_TEAM_ID`
+6. Add GitHub variable `LINEAR_TEAM_ID` with the team UUID or key
 
 ### 4. GitHub secrets and variables
 
@@ -62,7 +64,7 @@ curl -X POST https://api.linear.app/graphql \
 | `SONAR_TOKEN` | Secret | SonarCloud authentication token |
 | `SNYK_TOKEN` | Secret | Snyk API token |
 | `LINEAR_API_KEY` | Secret | Linear personal API key |
-| `LINEAR_TEAM_ID` | Variable | Linear team UUID |
+| `LINEAR_TEAM_ID` | Variable | Linear team UUID, team key, or project name |
 
 ## CI workflow
 
