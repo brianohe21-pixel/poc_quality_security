@@ -29,20 +29,36 @@ function run(command) {
   }).trim();
 }
 
-function buildPrompt({ source, issueIdentifier, issueUrl, findings, baseRef }) {
+function buildPrompt({ source, issueIdentifier, issueUrl, findings, supplementaryFindings, baseRef }) {
   const findingsJson = JSON.stringify(findings, null, 2);
   const sourceLabel = source === 'sonarcloud' ? 'SonarCloud code quality' : 'Snyk security';
+  const supplementaryJson =
+    supplementaryFindings?.length > 0
+      ? JSON.stringify(supplementaryFindings, null, 2)
+      : null;
+
+  const supplementarySection = supplementaryJson
+    ? `
+
+Additional SonarCloud findings (fix these too so the PR passes SonarCloud CI):
+${supplementaryJson}`
+    : '';
+
+  const fixScope =
+    supplementaryJson && source === 'snyk'
+      ? '- Fix all Snyk and SonarCloud issues listed below.'
+      : '- Fix only the issues listed above.';
 
   return `You are fixing ${sourceLabel} findings for a Node.js Express project.
 
 Linear issue: ${issueIdentifier}
 Linear URL: ${issueUrl}
 
-Findings to fix:
-${findingsJson}
+Primary findings (${sourceLabel}):
+${findingsJson}${supplementarySection}
 
 Requirements:
-- Fix only the issues listed above.
+${fixScope}
 - Keep all existing tests passing (run npm test).
 - Do not introduce unrelated changes.
 - Base branch is ${baseRef}.
@@ -158,7 +174,19 @@ async function runFixAgent() {
   const [owner, repo] = repository.split('/');
 
   const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
-  const prompt = buildPrompt({ source, issueIdentifier, issueUrl, findings, baseRef });
+  const sonarFindingsPath = process.env.SONAR_FINDINGS_PATH?.trim();
+  const supplementaryFindings =
+    source === 'snyk' && sonarFindingsPath
+      ? JSON.parse(readFileSync(sonarFindingsPath, 'utf8'))
+      : null;
+  const prompt = buildPrompt({
+    source,
+    issueIdentifier,
+    issueUrl,
+    findings,
+    supplementaryFindings,
+    baseRef,
+  });
 
   let outcome;
 

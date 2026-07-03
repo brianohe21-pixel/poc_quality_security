@@ -297,6 +297,14 @@ jobs:
           FINDINGS_OUTPUT: snyk-findings.json
         run: node scripts/fetch-snyk-findings.mjs
 
+      - name: Fetch SonarCloud findings
+        id: fetch_sonar_findings
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+          FINDINGS_OUTPUT: sonar-findings.json
+        run: node scripts/fetch-sonar-findings.mjs
+
       - name: Ensure develop branch exists
         env:
           GH_TOKEN: ${{ github.token }}
