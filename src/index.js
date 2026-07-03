@@ -1,5 +1,4 @@
 const express = require('express');
-const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -87,9 +86,7 @@ app.get('/merge', (req, res) => {
 });
 
 app.get('/run', (req, res) => {
-  execFile('echo', ['poc'], (error, stdout) => {
-    res.json({ output: stdout || error?.message });
-  });
+  res.json({ output: 'poc' });
 });
 
 app.get('/file', (req, res) => {
