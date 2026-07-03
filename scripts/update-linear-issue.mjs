@@ -33,7 +33,6 @@ async function updateIssue() {
     throw new Error('Linear issueUpdate returned success=false');
   }
 
-  const issue = data.issueUpdate.issue;
   console.log('Updated Linear issue state successfully');
 
   if (comment) {

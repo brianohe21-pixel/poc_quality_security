@@ -39,6 +39,15 @@ function formatFindingSummary(findings) {
     .join('\n');
 }
 
+function prioritizeSonarFindings(findings) {
+  const srcFindings = findings.filter((finding) => /:src\//.test(finding.component || ''));
+  const prioritized = srcFindings.length > 0 ? srcFindings : findings;
+  const rank = { BLOCKER: 0, CRITICAL: 1, MAJOR: 2, MINOR: 3, INFO: 4 };
+  return [...prioritized].sort(
+    (left, right) => (rank[left.severity] ?? 9) - (rank[right.severity] ?? 9)
+  );
+}
+
 function buildPrompt({ source, issueIdentifier, issueUrl, findings, supplementaryFindings, baseRef, strict }) {
   const findingsJson = JSON.stringify(findings, null, 2);
   const findingSummary = formatFindingSummary(findings);
@@ -56,9 +65,11 @@ ${supplementaryJson}`
     : '';
 
   const fixScope =
-    supplementaryJson && source === 'snyk'
-      ? '- Fix all Snyk and SonarCloud issues listed below.'
-      : '- Fix all listed findings in the primary section.';
+    source === 'sonarcloud'
+      ? '- Fix SonarCloud findings in src/ first (sonar.sources=src). Only change scripts/ if every src/ finding is resolved.'
+      : supplementaryJson && source === 'snyk'
+        ? '- Fix all Snyk and SonarCloud issues listed below.'
+        : '- Fix all listed findings in the primary section.';
 
   const strictSection = strict
     ? `
@@ -160,51 +171,38 @@ function createPullRequest({ owner, repo, baseRef, branchName, issueIdentifier, 
   return prUrl;
 }
 
-async function runLocalAgentAndCreatePr({
-  apiKey,
-  owner,
-  repo,
-  baseRef,
-  prompt,
-  issueIdentifier,
-  source,
-  findings,
-  supplementaryFindings,
-  issueUrl,
-}) {
+function buildRetryPrompt(attempt, prompt, promptParams) {
+  if (attempt === 1) {
+    return prompt;
+  }
+  return buildPrompt({ ...promptParams, strict: true });
+}
+
+async function runAgentAttempts({ apiKey, baseRef, prompt, promptParams }) {
   const maxAttempts = Number(process.env.LOCAL_AGENT_ATTEMPTS || 2);
-  let result;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     prepareWorkingTree(baseRef);
-
-    const attemptPrompt =
-      attempt === 1
-        ? prompt
-        : buildPrompt({
-            source,
-            issueIdentifier,
-            issueUrl,
-            findings,
-            supplementaryFindings,
-            baseRef,
-            strict: true,
-          });
-
+    const attemptPrompt = buildRetryPrompt(attempt, prompt, promptParams);
     console.log(`Running local agent attempt ${attempt}/${maxAttempts}`);
-    result = await runLocalAgentOnce({ apiKey, prompt: attemptPrompt });
+    const result = await runLocalAgentOnce({ apiKey, prompt: attemptPrompt });
 
     if (hasWorkingTreeChanges()) {
-      break;
+      return result;
     }
 
-    if (attempt === maxAttempts) {
-      throw new Error('Local agent completed without file changes');
+    if (attempt < maxAttempts) {
+      console.warn('Local agent made no file changes, retrying with stricter prompt');
+      continue;
     }
 
-    console.warn('Local agent made no file changes, retrying with stricter prompt');
+    throw new Error('Local agent completed without file changes');
   }
 
+  throw new Error('Local agent completed without file changes');
+}
+
+function publishRemediationChanges({ owner, repo, baseRef, issueIdentifier, source, result }) {
   const branchName = `fix/linear-${sanitizeBranchPart(issueIdentifier)}-${source}`;
   run('git checkout -- .github/');
   run(`git checkout -b "${branchName}"`);
@@ -224,6 +222,14 @@ async function runLocalAgentAndCreatePr({
   };
 }
 
+async function runLocalAgentAndCreatePr(params) {
+  const { apiKey, owner, repo, baseRef, prompt, issueIdentifier, source, findings, supplementaryFindings, issueUrl } =
+    params;
+  const promptParams = { source, issueIdentifier, issueUrl, findings, supplementaryFindings, baseRef };
+  const result = await runAgentAttempts({ apiKey, baseRef, prompt, promptParams });
+  return publishRemediationChanges({ owner, repo, baseRef, issueIdentifier, source, result });
+}
+
 function extractCloudResult(result, usedBaseRef) {
   const branch = result.git?.branches?.[0];
   const prUrl = branch?.prUrl || '';
@@ -239,7 +245,8 @@ function extractCloudResult(result, usedBaseRef) {
 }
 
 function loadFindingsContext(source, findingsPath) {
-  const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
+  const rawFindings = JSON.parse(readFileSync(findingsPath, 'utf8'));
+  const findings = source === 'sonarcloud' ? prioritizeSonarFindings(rawFindings) : rawFindings;
   const sonarFindingsPath = process.env.SONAR_FINDINGS_PATH?.trim();
   const supplementaryFindings =
     source === 'snyk' && sonarFindingsPath

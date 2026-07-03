@@ -3,15 +3,32 @@ const { execFile } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const _ = require('lodash');
 
 const app = express();
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const unusedConfig = { debug: true, retries: 3 };
-const API_SECRET = 'sk_live_poc_quality_security_test_key';
+const ALLOWED_PROXY_HOSTS = new Set(['example.com', 'www.example.com']);
 
 app.use(express.json());
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function resolveSafeFilePath(name) {
+  const baseName = path.basename(String(name || 'package.json'));
+  const resolved = path.resolve(process.cwd(), baseName);
+  if (!resolved.startsWith(`${process.cwd()}${path.sep}`) && resolved !== process.cwd()) {
+    return null;
+  }
+  return resolved;
+}
 
 function buildQuery(userId) {
   return 'SELECT * FROM users WHERE id = ' + userId;
@@ -65,48 +82,55 @@ app.post('/execute', (req, res) => {
 });
 
 app.get('/merge', (req, res) => {
-  const merged = _.merge({}, req.query);
+  const merged = { ...req.query };
   res.json(merged);
 });
 
 app.get('/run', (req, res) => {
   execFile('echo', ['poc'], (error, stdout) => {
-    res.json({ output: stdout || error?.message, secret: API_SECRET });
+    res.json({ output: stdout || error?.message });
   });
 });
 
 app.get('/file', (req, res) => {
-  const filePath = path.join(process.cwd(), req.query.name || 'package.json');
+  const filePath = resolveSafeFilePath(req.query.name);
+  if (!filePath) {
+    res.status(400).json({ error: 'Invalid file name' });
+    return;
+  }
   const content = fs.readFileSync(filePath, 'utf8');
   res.type('text/plain').send(content);
 });
 
 app.get('/echo', (req, res) => {
   const message = req.query.message || 'hello';
-  res.send(`<html><body>${message}</body></html>`);
+  res.send(`<html><body>${escapeHtml(message)}</body></html>`);
 });
 
 app.get('/hash', (req, res) => {
   const password = req.query.password || 'test';
-  const hash = crypto.createHash('md5').update(password).digest('hex');
+  const hash = crypto.createHash('sha256').update(password).digest('hex');
   res.json({ hash });
 });
 
 app.get('/proxy', async (req, res) => {
-  const target = req.query.url || 'https://example.com';
+  const target = new URL(req.query.url || 'https://example.com');
+  if (!ALLOWED_PROXY_HOSTS.has(target.hostname)) {
+    res.status(400).json({ error: 'Host not allowed' });
+    return;
+  }
   const response = await fetch(target);
   const body = await response.text();
   res.type('text/plain').send(body.slice(0, 500));
 });
 
 app.get('/session', (req, res) => {
-  const sessionId = Math.random().toString(36).slice(2);
-  res.json({ sessionId, credential: API_SECRET });
+  const sessionId = crypto.randomUUID();
+  res.json({ sessionId });
 });
 
 app.post('/config', (req, res) => {
-  const config = {};
-  Object.assign(config, req.body);
+  const config = { ...(req.body || {}) };
   res.json(config);
 });
 

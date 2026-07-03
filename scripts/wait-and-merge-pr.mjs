@@ -33,12 +33,52 @@ function hasChecksOutput(output) {
   return Boolean(output?.trim());
 }
 
+function parseCheckLine(line) {
+  const match = line.match(/^(.+?)\t+(pass|fail|pending|skip|cancel)\t/i);
+  if (match) {
+    return { name: match[1].trim(), status: match[2].toLowerCase() };
+  }
+  const spaced = line.match(/^(.+?)\s+(pass|fail|pending|skip|cancel)(?:\s|$)/i);
+  if (spaced) {
+    return { name: spaced[1].trim(), status: spaced[2].toLowerCase() };
+  }
+  return null;
+}
+
+function shouldSkipCheck(checkName) {
+  const remediationSource = process.env.REMEDIATION_SOURCE?.trim();
+  if (remediationSource === 'sonarcloud' && /sonarcloud/i.test(checkName)) {
+    return true;
+  }
+  const skipPattern = process.env.SKIP_CHECK_PATTERN?.trim();
+  if (skipPattern && new RegExp(skipPattern, 'i').test(checkName)) {
+    return true;
+  }
+  return false;
+}
+
 function checksFailed(output) {
-  return output.split('\n').some((line) => /\bfail/i.test(line) || /\bcancel/i.test(line));
+  return output.split('\n').some((line) => {
+    const check = parseCheckLine(line);
+    if (!check) {
+      return false;
+    }
+    if (shouldSkipCheck(check.name)) {
+      console.log(`Skipping check "${check.name}" (${check.status}) for remediation source`);
+      return false;
+    }
+    return check.status === 'fail';
+  });
 }
 
 function checksPending(output) {
-  return output.split('\n').some((line) => /\spending\s/i.test(line) || /\sin progress\s/i.test(line));
+  return output.split('\n').some((line) => {
+    const check = parseCheckLine(line);
+    if (!check || shouldSkipCheck(check.name)) {
+      return false;
+    }
+    return check.status === 'pending';
+  });
 }
 
 async function waitForChecks(prNumber, repo, deadline) {
