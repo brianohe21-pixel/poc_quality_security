@@ -133,6 +133,16 @@ app.post('/config', (req, res) => {
   res.json(config);
 });
 
+app.get('/redirect', (req, res) => {
+  res.redirect(req.query.url || '/health');
+});
+
+app.get('/debug', (req, res) => {
+  const payload = req.query.payload || 'ping';
+  console.log(`debug request: ${payload}`);
+  res.json({ received: payload });
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
