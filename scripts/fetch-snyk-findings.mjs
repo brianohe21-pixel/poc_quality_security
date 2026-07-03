@@ -1,20 +1,42 @@
 import { execSync } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { requiredEnv } from './lib/linear-client.mjs';
 
 const SNYK_API_URL = 'https://api.snyk.io';
+const SAFE_PATH_DIRS = ['/usr/local/bin', '/usr/bin', '/bin', path.dirname(process.execPath)];
+const ALLOWED_SNYK_PATHS = [
+  /^\/v1\/orgs$/,
+  /^\/v1\/org\/[0-9a-f-]+\/projects$/,
+  /^\/v1\/org\/[0-9a-f-]+\/project\/[0-9a-f-]+\/aggregated-issues$/,
+];
 
 function setGithubOutput(name, value) {
   const outputFile = process.env.GITHUB_OUTPUT;
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
-async function snykRequest(path, token) {
-  const response = await fetch(`${SNYK_API_URL}${path}`, {
+function createSafeEnv() {
+  return {
+    ...process.env,
+    PATH: SAFE_PATH_DIRS.join(':'),
+  };
+}
+
+function isAllowedSnykPath(apiPath) {
+  return ALLOWED_SNYK_PATHS.some((pattern) => pattern.test(apiPath));
+}
+
+async function snykRequest(apiPath, token) {
+  if (!isAllowedSnykPath(apiPath)) {
+    throw new Error('Invalid Snyk API path');
+  }
+
+  const response = await fetch(`${SNYK_API_URL}${apiPath}`, {
     headers: {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
@@ -64,7 +86,7 @@ function fetchFindingsViaCli(outputPath) {
   try {
     stdout = execSync('npx snyk test --json --severity-threshold=high', {
       encoding: 'utf8',
-      env: process.env,
+      env: createSafeEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -147,7 +169,9 @@ async function fetchSnykFindings() {
   console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
 }
 
-fetchSnykFindings().catch((error) => {
+try {
+  await fetchSnykFindings();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}
