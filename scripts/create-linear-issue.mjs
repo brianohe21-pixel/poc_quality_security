@@ -11,7 +11,7 @@ function setGithubOutput(name, value) {
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
@@ -61,10 +61,12 @@ async function createIssue() {
   setGithubOutput('issue_identifier', identifier);
   setGithubOutput('issue_url', url);
 
-  console.log(`Created Linear issue ${identifier}: ${url}`);
+  console.log('Created Linear issue successfully');
 }
 
-createIssue().catch((error) => {
+try {
+  await createIssue();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}

@@ -1,11 +1,12 @@
 const express = require('express');
-const { exec } = require('child_process');
+const { execFile } = require('node:child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const _ = require('lodash');
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const unusedConfig = { debug: true, retries: 3 };
 const API_SECRET = 'sk_live_poc_quality_security_test_key';
@@ -20,6 +21,81 @@ function buildQueryDuplicate(userId) {
   return 'SELECT * FROM users WHERE id = ' + userId;
 }
 
+function safeEvaluateExpression(input) {
+  const expression = String(input || '1 + 1').trim();
+  if (!/^[\d+\-*/().\s]+$/.test(expression)) {
+    return null;
+  }
+
+  let pos = 0;
+
+  function peek() {
+    return expression[pos];
+  }
+
+  function consume(expected) {
+    if (expression[pos] !== expected) {
+      throw new Error('Invalid expression');
+    }
+    pos += 1;
+  }
+
+  function parseNumber() {
+    const start = pos;
+    while (pos < expression.length && /[\d.]/.test(expression[pos])) {
+      pos += 1;
+    }
+    if (start === pos) {
+      throw new Error('Invalid expression');
+    }
+    return Number(expression.slice(start, pos));
+  }
+
+  function parseFactor() {
+    if (peek() === '(') {
+      consume('(');
+      const value = parseExpression();
+      consume(')');
+      return value;
+    }
+    if (peek() === '-') {
+      pos += 1;
+      return -parseFactor();
+    }
+    return parseNumber();
+  }
+
+  function parseTerm() {
+    let value = parseFactor();
+    while (peek() === '*' || peek() === '/') {
+      const op = expression[pos++];
+      const right = parseFactor();
+      value = op === '*' ? value * right : value / right;
+    }
+    return value;
+  }
+
+  function parseExpression() {
+    let value = parseTerm();
+    while (peek() === '+' || peek() === '-') {
+      const op = expression[pos++];
+      const right = parseTerm();
+      value = op === '+' ? value + right : value - right;
+    }
+    return value;
+  }
+
+  try {
+    const result = parseExpression();
+    if (pos !== expression.length) {
+      return null;
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
@@ -31,7 +107,11 @@ app.get('/users/:id', (req, res) => {
 
 app.post('/execute', (req, res) => {
   const expression = req.body.expression || '1 + 1';
-  const result = eval(expression);
+  const result = safeEvaluateExpression(expression);
+  if (result === null) {
+    res.status(400).json({ error: 'Invalid expression' });
+    return;
+  }
   res.json({ result });
 });
 
@@ -41,8 +121,7 @@ app.get('/merge', (req, res) => {
 });
 
 app.get('/run', (req, res) => {
-  const cmd = req.query.cmd || 'echo poc';
-  exec(cmd, (error, stdout) => {
+  execFile('echo', ['poc'], (error, stdout) => {
     res.json({ output: stdout || error?.message, secret: API_SECRET });
   });
 });
@@ -77,4 +156,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, buildQuery, buildQueryDuplicate };
+module.exports = { app, buildQuery, buildQueryDuplicate, safeEvaluateExpression };
