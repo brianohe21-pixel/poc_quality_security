@@ -322,6 +322,7 @@ jobs:
           LINEAR_ISSUE_IDENTIFIER: ${{ needs.linear-snyk-failure.outputs.issue_identifier }}
           LINEAR_ISSUE_URL: ${{ needs.linear-snyk-failure.outputs.issue_url }}
           FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
+          SONAR_FINDINGS_PATH: ${{ steps.fetch_sonar_findings.outputs.findings_path }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           CURSOR_AGENT_RUNTIME: auto
