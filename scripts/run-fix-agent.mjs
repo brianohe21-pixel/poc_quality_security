@@ -16,7 +16,7 @@ function extractPrNumber(prUrl) {
   return match ? match[1] : '';
 }
 
-function buildPrompt({ source, issueIdentifier, issueUrl, findings }) {
+function buildPrompt({ source, issueIdentifier, issueUrl, findings, baseRef }) {
   const findingsJson = JSON.stringify(findings, null, 2);
   const sourceLabel = source === 'sonarcloud' ? 'SonarCloud code quality' : 'Snyk security';
 
@@ -32,10 +32,30 @@ Requirements:
 - Fix only the issues listed above.
 - Keep all existing tests passing (run npm test).
 - Do not introduce unrelated changes.
-- Base branch is develop.
-- Open a pull request targeting develop when done.
+- Base branch is ${baseRef}.
+- Open a pull request targeting ${baseRef} when done.
 
 Repository context: poc-quality-security Node.js service in src/.`;
+}
+
+async function runAgentPrompt({ apiKey, owner, repo, baseRef, prompt }) {
+  return Agent.prompt(prompt, {
+    apiKey,
+    model: { id: 'composer-2.5' },
+    cloud: {
+      repos: [{ url: `https://github.com/${owner}/${repo}`, startingRef: baseRef }],
+      autoCreatePR: true,
+      skipReviewerRequest: true,
+    },
+  });
+}
+
+function isMissingBranchError(error) {
+  return (
+    error instanceof CursorAgentError &&
+    /branch/i.test(error.message) &&
+    /exist|verify|not found/i.test(error.message)
+  );
 }
 
 async function runFixAgent() {
@@ -45,28 +65,40 @@ async function runFixAgent() {
   const issueUrl = process.env.LINEAR_ISSUE_URL || '';
   const findingsPath = requiredEnv('FINDINGS_PATH');
   const repository = requiredEnv('GITHUB_REPOSITORY');
+  const baseRef = process.env.REMEDIATION_BASE_REF?.trim() || 'develop';
   const [owner, repo] = repository.split('/');
 
   const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
-  const prompt = buildPrompt({ source, issueIdentifier, issueUrl, findings });
+  const prompt = buildPrompt({ source, issueIdentifier, issueUrl, findings, baseRef });
 
   let result;
+  let usedBaseRef = baseRef;
   try {
-    result = await Agent.prompt(prompt, {
-      apiKey,
-      model: { id: 'composer-2.5' },
-      cloud: {
-        repos: [{ url: `https://github.com/${owner}/${repo}`, startingRef: 'develop' }],
-        autoCreatePR: true,
-        skipReviewerRequest: true,
-      },
-    });
+    result = await runAgentPrompt({ apiKey, owner, repo, baseRef, prompt });
   } catch (error) {
-    if (error instanceof CursorAgentError) {
+    if (isMissingBranchError(error) && baseRef !== 'main') {
+      console.warn(`Branch "${baseRef}" is not visible to Cursor. Retrying with "main".`);
+      usedBaseRef = 'main';
+      const fallbackPrompt = buildPrompt({
+        source,
+        issueIdentifier,
+        issueUrl,
+        findings,
+        baseRef: usedBaseRef,
+      });
+      result = await runAgentPrompt({
+        apiKey,
+        owner,
+        repo,
+        baseRef: usedBaseRef,
+        prompt: fallbackPrompt,
+      });
+    } else if (error instanceof CursorAgentError) {
       console.error(`Agent startup failed: ${error.message} (retryable=${error.isRetryable})`);
       process.exit(1);
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   if (result.status === 'error') {
@@ -84,8 +116,9 @@ async function runFixAgent() {
   setGithubOutput('pr_url', prUrl);
   setGithubOutput('pr_number', prNumber);
   setGithubOutput('branch_name', branchName);
+  setGithubOutput('base_ref', usedBaseRef);
 
-  console.log(`Agent run ${result.id} completed`);
+  console.log(`Agent run ${result.id} completed (base ref: ${usedBaseRef})`);
   if (prUrl) {
     console.log(`Pull request: ${prUrl}`);
   } else if (branchName) {

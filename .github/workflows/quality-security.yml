@@ -186,12 +186,20 @@ jobs:
           FINDINGS_OUTPUT: sonar-findings.json
         run: node scripts/fetch-sonar-findings.mjs
 
+      - name: Ensure develop branch exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin main
+          git push origin "origin/main:refs/heads/develop"
+
       - name: Run fix agent
         id: fix_agent
         timeout-minutes: 30
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           SOURCE: sonarcloud
+          REMEDIATION_BASE_REF: develop
           LINEAR_ISSUE_IDENTIFIER: ${{ needs.linear-sonar-failure.outputs.issue_identifier }}
           LINEAR_ISSUE_URL: ${{ needs.linear-sonar-failure.outputs.issue_url }}
           FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
@@ -282,12 +290,20 @@ jobs:
           FINDINGS_OUTPUT: snyk-findings.json
         run: node scripts/fetch-snyk-findings.mjs
 
+      - name: Ensure develop branch exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin main
+          git push origin "origin/main:refs/heads/develop"
+
       - name: Run fix agent
         id: fix_agent
         timeout-minutes: 30
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           SOURCE: snyk
+          REMEDIATION_BASE_REF: develop
           LINEAR_ISSUE_IDENTIFIER: ${{ needs.linear-snyk-failure.outputs.issue_identifier }}
           LINEAR_ISSUE_URL: ${{ needs.linear-snyk-failure.outputs.issue_url }}
           FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
