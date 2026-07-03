@@ -173,7 +173,7 @@ async function fetchSnykFindings() {
   setGithubOutput('findings_count', String(findings.length));
   setGithubOutput('findings_source', source);
 
-  console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
+  console.log(`Fetched ${findings.length} Snyk findings via ${source}`);
 }
 
 try {
