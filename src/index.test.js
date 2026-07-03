@@ -1,11 +1,17 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { buildQuery, safeEvaluate } = require('./index');
+const { buildQuery, safeEvaluate, RUN_OUTPUT } = require('./index');
 
 describe('buildQuery', () => {
   it('returns a SQL string with the provided user id', () => {
     const query = buildQuery('42');
     assert.equal(query, 'SELECT * FROM users WHERE id = 42');
+  });
+});
+
+describe('RUN_OUTPUT', () => {
+  it('uses a fixed response instead of executing shell commands', () => {
+    assert.equal(RUN_OUTPUT, 'poc');
   });
 });
 
