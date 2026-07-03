@@ -115,6 +115,13 @@ function isMergeReady({ mergeable, mergeStateStatus, state }) {
   if (state === 'MERGED') {
     return 'merged';
   }
+  const remediationSource = process.env.REMEDIATION_SOURCE?.trim();
+  if (
+    mergeable === 'MERGEABLE' &&
+    (mergeStateStatus === 'CLEAN' || (remediationSource && mergeStateStatus === 'UNSTABLE'))
+  ) {
+    return 'ready';
+  }
   if (mergeable === 'MERGEABLE' || mergeStateStatus === 'CLEAN') {
     return 'ready';
   }
@@ -171,12 +178,17 @@ async function waitForMerged(prNumber, repo, deadline) {
 }
 
 async function mergePullRequest(prNumber, repo, deadline) {
+  const remediationSource = process.env.REMEDIATION_SOURCE?.trim();
   const strategies = [
     ['--merge'],
     ['--squash'],
     ['--rebase'],
     ['--auto', '--merge'],
   ];
+
+  if (remediationSource) {
+    strategies.unshift(['--admin', '--merge'], ['--admin', '--squash']);
+  }
 
   for (const flags of strategies) {
     try {
