@@ -8,7 +8,7 @@ function setGithubOutput(name, value) {
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
@@ -162,6 +162,52 @@ function extractCloudResult(result, usedBaseRef) {
   };
 }
 
+function loadAgentInputs(findingsPath, source, sonarFindingsPath) {
+  const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
+  const supplementaryFindings =
+    source === 'snyk' && sonarFindingsPath
+      ? JSON.parse(readFileSync(sonarFindingsPath, 'utf8'))
+      : null;
+  return { findings, supplementaryFindings };
+}
+
+function handleAgentError(error, runtimeMode) {
+  const canFallback = runtimeMode === 'auto' && shouldFallbackToLocal(error);
+  if (!canFallback) {
+    if (error instanceof CursorAgentError) {
+      console.error(`Agent startup failed: ${error.message} (retryable=${error.isRetryable})`);
+      process.exit(1);
+    }
+    throw error;
+  }
+  console.warn('Cloud agent cannot access the repository. Falling back to local agent in CI.');
+}
+
+async function runCloudAgentFlow({ apiKey, owner, repo, baseRef, prompt, issueIdentifier, source, runtimeMode }) {
+  try {
+    const result = await runCloudAgent({ apiKey, owner, repo, baseRef, prompt });
+    if (result.status === 'error') {
+      throw new Error(`Cloud agent run failed: ${result.id}`);
+    }
+    const outcome = extractCloudResult(result, baseRef);
+    if (!outcome.prUrl && !outcome.branchName) {
+      throw new Error('Cloud agent completed without PR URL or branch name');
+    }
+    return outcome;
+  } catch (error) {
+    handleAgentError(error, runtimeMode);
+    return runLocalAgentAndCreatePr({
+      apiKey,
+      owner,
+      repo,
+      baseRef,
+      prompt,
+      issueIdentifier,
+      source,
+    });
+  }
+}
+
 async function runFixAgent() {
   const apiKey = requiredEnv('CURSOR_API_KEY');
   const source = requiredEnv('SOURCE');
@@ -173,12 +219,11 @@ async function runFixAgent() {
   const runtimeMode = (process.env.CURSOR_AGENT_RUNTIME || 'auto').toLowerCase();
   const [owner, repo] = repository.split('/');
 
-  const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
-  const sonarFindingsPath = process.env.SONAR_FINDINGS_PATH?.trim();
-  const supplementaryFindings =
-    source === 'snyk' && sonarFindingsPath
-      ? JSON.parse(readFileSync(sonarFindingsPath, 'utf8'))
-      : null;
+  const { findings, supplementaryFindings } = loadAgentInputs(
+    findingsPath,
+    source,
+    process.env.SONAR_FINDINGS_PATH?.trim()
+  );
   const prompt = buildPrompt({
     source,
     issueIdentifier,
@@ -188,50 +233,11 @@ async function runFixAgent() {
     baseRef,
   });
 
-  let outcome;
-
-  if (runtimeMode === 'local') {
-    outcome = await runLocalAgentAndCreatePr({
-      apiKey,
-      owner,
-      repo,
-      baseRef,
-      prompt,
-      issueIdentifier,
-      source,
-    });
-  } else {
-    try {
-      const result = await runCloudAgent({ apiKey, owner, repo, baseRef, prompt });
-      if (result.status === 'error') {
-        throw new Error(`Cloud agent run failed: ${result.id}`);
-      }
-      outcome = extractCloudResult(result, baseRef);
-      if (!outcome.prUrl && !outcome.branchName) {
-        throw new Error('Cloud agent completed without PR URL or branch name');
-      }
-    } catch (error) {
-      const canFallback = runtimeMode === 'auto' && shouldFallbackToLocal(error);
-      if (!canFallback) {
-        if (error instanceof CursorAgentError) {
-          console.error(`Agent startup failed: ${error.message} (retryable=${error.isRetryable})`);
-          process.exit(1);
-        }
-        throw error;
-      }
-
-      console.warn('Cloud agent cannot access the repository. Falling back to local agent in CI.');
-      outcome = await runLocalAgentAndCreatePr({
-        apiKey,
-        owner,
-        repo,
-        baseRef,
-        prompt,
-        issueIdentifier,
-        source,
-      });
-    }
-  }
+  const agentParams = { apiKey, owner, repo, baseRef, prompt, issueIdentifier, source };
+  const outcome =
+    runtimeMode === 'local'
+      ? await runLocalAgentAndCreatePr(agentParams)
+      : await runCloudAgentFlow({ ...agentParams, runtimeMode });
 
   setGithubOutput('agent_run_id', outcome.result.id || '');
   setGithubOutput('pr_url', outcome.prUrl);
@@ -248,7 +254,9 @@ async function runFixAgent() {
   }
 }
 
-runFixAgent().catch((error) => {
+try {
+  await runFixAgent();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}

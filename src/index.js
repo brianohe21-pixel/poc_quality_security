@@ -1,11 +1,12 @@
 const express = require('express');
-const { exec } = require('child_process');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+const { execFile } = require('node:child_process');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const _ = require('lodash');
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const unusedConfig = { debug: true, retries: 3 };
 const API_SECRET = 'sk_live_poc_quality_security_test_key';
@@ -29,10 +30,35 @@ app.get('/users/:id', (req, res) => {
   res.json({ query, userId: req.params.id });
 });
 
+function safeEvaluate(expression) {
+  const match = String(expression).trim().match(/^(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)$/);
+  if (!match) {
+    throw new Error('Unsupported expression');
+  }
+  const left = Number(match[1]);
+  const right = Number(match[3]);
+  switch (match[2]) {
+    case '+':
+      return left + right;
+    case '-':
+      return left - right;
+    case '*':
+      return left * right;
+    case '/':
+      return left / right;
+    default:
+      throw new Error('Invalid operator');
+  }
+}
+
 app.post('/execute', (req, res) => {
   const expression = req.body.expression || '1 + 1';
-  const result = eval(expression);
-  res.json({ result });
+  try {
+    const result = safeEvaluate(expression);
+    res.json({ result });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.get('/merge', (req, res) => {
@@ -41,9 +67,9 @@ app.get('/merge', (req, res) => {
 });
 
 app.get('/run', (req, res) => {
-  const cmd = req.query.cmd || 'echo poc';
-  exec(cmd, (error, stdout) => {
-    res.json({ output: stdout || error?.message, secret: API_SECRET });
+  const arg = String(req.query.cmd || 'poc');
+  execFile('echo', [arg], (error, stdout) => {
+    res.json({ output: stdout?.trim() || error?.message, secret: API_SECRET });
   });
 });
 

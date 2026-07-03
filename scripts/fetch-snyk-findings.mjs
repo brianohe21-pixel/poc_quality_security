@@ -3,17 +3,22 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { requiredEnv } from './lib/linear-client.mjs';
 
 const SNYK_API_URL = 'https://api.snyk.io';
+const SAFE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+const SNYK_API_PATH_PATTERN = /^\/v1\/[\w/-]+$/;
 
 function setGithubOutput(name, value) {
   const outputFile = process.env.GITHUB_OUTPUT;
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
 async function snykRequest(path, token) {
+  if (!SNYK_API_PATH_PATTERN.test(path)) {
+    throw new Error('Invalid Snyk API path');
+  }
   const response = await fetch(`${SNYK_API_URL}${path}`, {
     headers: {
       Authorization: `token ${token}`,
@@ -64,7 +69,7 @@ function fetchFindingsViaCli(outputPath) {
   try {
     stdout = execSync('npx snyk test --json --severity-threshold=high', {
       encoding: 'utf8',
-      env: process.env,
+      env: { ...process.env, PATH: SAFE_PATH },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -147,7 +152,9 @@ async function fetchSnykFindings() {
   console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
 }
 
-fetchSnykFindings().catch((error) => {
+try {
+  await fetchSnykFindings();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}
