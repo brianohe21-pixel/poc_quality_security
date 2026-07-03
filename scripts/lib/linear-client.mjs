@@ -168,7 +168,7 @@ export async function getIssueTeamId(issueId) {
 }
 
 export async function resolveWorkflowStateId(teamId, stateName) {
-  const overrideId = process.env[`LINEAR_STATE_${stateName.toUpperCase().replace(/\s+/g, '_')}_ID`]?.trim();
+  const overrideId = process.env[`LINEAR_STATE_${stateName.toUpperCase().replaceAll(/\s+/g, '_')}_ID`]?.trim();
   if (overrideId) {
     return overrideId;
   }
