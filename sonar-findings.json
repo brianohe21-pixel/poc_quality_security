@@ -1,0 +1,236 @@
+[
+  {
+    "rule": "javascript:S4036",
+    "severity": "MINOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/fetch-snyk-findings.mjs",
+    "line": 65,
+    "message": "Make sure the \"PATH\" variable only contains fixed, unwriteable directories.",
+    "effort": "15min"
+  },
+  {
+    "rule": "javascript:S3776",
+    "severity": "CRITICAL",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/run-fix-agent.mjs",
+    "line": 149,
+    "message": "Refactor this function to reduce its Cognitive Complexity from 18 to the 15 allowed.",
+    "effort": "8min"
+  },
+  {
+    "rule": "javascript:S7781",
+    "severity": "MINOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/create-linear-issue.mjs",
+    "line": 14,
+    "message": "Prefer `String#replaceAll()` over `String#replace()`.",
+    "effort": "5min"
+  },
+  {
+    "rule": "jssecurity:S5145",
+    "severity": "MINOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/create-linear-issue.mjs",
+    "line": 64,
+    "message": "Change this code to not log user-controlled data.",
+    "effort": "30min"
+  },
+  {
+    "rule": "githubactions:S8233",
+    "severity": "MAJOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:.github/workflows/quality-security.yml",
+    "line": 12,
+    "message": "Move this write permission from workflow level to job level.",
+    "effort": "5min"
+  },
+  {
+    "rule": "githubactions:S8233",
+    "severity": "MAJOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:.github/workflows/quality-security.yml",
+    "line": 13,
+    "message": "Move this write permission from workflow level to job level.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S7781",
+    "severity": "MINOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/fetch-snyk-findings.mjs",
+    "line": 12,
+    "message": "Prefer `String#replaceAll()` over `String#replace()`.",
+    "effort": "5min"
+  },
+  {
+    "rule": "jssecurity:S7044",
+    "severity": "MAJOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/fetch-snyk-findings.mjs",
+    "line": 17,
+    "message": "Change this code to not construct the URL's path from user-controlled data.",
+    "effort": "30min"
+  },
+  {
+    "rule": "jssecurity:S8476",
+    "severity": "MINOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/fetch-snyk-findings.mjs",
+    "line": 17,
+    "message": "Ensure that tainted data is validated before being used to construct a client-side request URL.",
+    "effort": "20min"
+  },
+  {
+    "rule": "javascript:S7785",
+    "severity": "MAJOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/fetch-snyk-findings.mjs",
+    "line": 150,
+    "message": "Prefer top-level await over using a promise chain.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S7781",
+    "severity": "MINOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/fetch-sonar-findings.mjs",
+    "line": 11,
+    "message": "Prefer `String#replaceAll()` over `String#replace()`.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S7785",
+    "severity": "MAJOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/fetch-sonar-findings.mjs",
+    "line": 55,
+    "message": "Prefer top-level await over using a promise chain.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S7781",
+    "severity": "MINOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/lib/linear-client.mjs",
+    "line": 19,
+    "message": "Prefer `String#replaceAll()` over `String#replace()`.",
+    "effort": "5min"
+  },
+  {
+    "rule": "jssecurity:S5145",
+    "severity": "MINOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/lib/linear-client.mjs",
+    "line": 146,
+    "message": "Change this code to not log user-controlled data.",
+    "effort": "30min"
+  },
+  {
+    "rule": "javascript:S7781",
+    "severity": "MINOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/run-fix-agent.mjs",
+    "line": 11,
+    "message": "Prefer `String#replaceAll()` over `String#replace()`.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S7785",
+    "severity": "MAJOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/run-fix-agent.mjs",
+    "line": 223,
+    "message": "Prefer top-level await over using a promise chain.",
+    "effort": "5min"
+  },
+  {
+    "rule": "jssecurity:S5145",
+    "severity": "MINOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/update-linear-issue.mjs",
+    "line": 37,
+    "message": "Change this code to not log user-controlled data.",
+    "effort": "30min"
+  },
+  {
+    "rule": "javascript:S7785",
+    "severity": "MAJOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/update-linear-issue.mjs",
+    "line": 45,
+    "message": "Prefer top-level await over using a promise chain.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S7785",
+    "severity": "MAJOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/wait-and-merge-pr.mjs",
+    "line": 80,
+    "message": "Prefer top-level await over using a promise chain.",
+    "effort": "5min"
+  },
+  {
+    "rule": "githubactions:S7637",
+    "severity": "MAJOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:.github/workflows/quality-security.yml",
+    "line": 59,
+    "message": "Use full commit SHA hash for this dependency.",
+    "effort": "30min"
+  },
+  {
+    "rule": "githubactions:S7637",
+    "severity": "MAJOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:.github/workflows/quality-security.yml",
+    "line": 65,
+    "message": "Use full commit SHA hash for this dependency.",
+    "effort": "30min"
+  },
+  {
+    "rule": "githubactions:S7637",
+    "severity": "MAJOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:.github/workflows/quality-security.yml",
+    "line": 88,
+    "message": "Use full commit SHA hash for this dependency.",
+    "effort": "30min"
+  },
+  {
+    "rule": "javascript:S7785",
+    "severity": "MAJOR",
+    "type": "CODE_SMELL",
+    "component": "brianohe21-pixel_poc_quality_security:scripts/create-linear-issue.mjs",
+    "line": 67,
+    "message": "Prefer top-level await over using a promise chain.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S5689",
+    "severity": "MINOR",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:src/index.js",
+    "line": 4,
+    "message": "This framework implicitly discloses version information by default. Make sure it is safe here.",
+    "effort": "5min"
+  },
+  {
+    "rule": "javascript:S1523",
+    "severity": "CRITICAL",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:src/index.js",
+    "line": 29,
+    "message": "Make sure that this dynamic injection or execution of code is safe.",
+    "effort": "30min"
+  },
+  {
+    "rule": "jssecurity:S5334",
+    "severity": "BLOCKER",
+    "type": "VULNERABILITY",
+    "component": "brianohe21-pixel_poc_quality_security:src/index.js",
+    "line": 29,
+    "message": "Change this code to not dynamically execute code influenced by user-controlled data.",
+    "effort": "30min"
+  }
+]

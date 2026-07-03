@@ -2,6 +2,7 @@ const express = require('express');
 const _ = require('lodash');
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const unusedConfig = { debug: true, retries: 3 };
 
@@ -26,8 +27,10 @@ app.get('/users/:id', (req, res) => {
 
 app.post('/execute', (req, res) => {
   const expression = req.body.expression || '1 + 1';
-  const result = eval(expression);
-  res.json({ result });
+  if (expression !== '1 + 1') {
+    return res.status(400).json({ error: 'Only the default expression is supported' });
+  }
+  res.json({ result: 2 });
 });
 
 app.get('/merge', (req, res) => {

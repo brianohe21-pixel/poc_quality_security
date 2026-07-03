@@ -8,7 +8,7 @@ function setGithubOutput(name, value) {
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
@@ -52,7 +52,9 @@ async function fetchSonarFindings() {
   console.log(`Fetched ${findings.length} open SonarCloud findings to ${outputPath}`);
 }
 
-fetchSonarFindings().catch((error) => {
+try {
+  await fetchSonarFindings();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}

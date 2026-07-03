@@ -3,18 +3,35 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { requiredEnv } from './lib/linear-client.mjs';
 
 const SNYK_API_URL = 'https://api.snyk.io';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SAFE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
 function setGithubOutput(name, value) {
   const outputFile = process.env.GITHUB_OUTPUT;
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
+function assertUuid(value, label) {
+  if (!UUID_PATTERN.test(value)) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return value;
+}
+
+function buildSnykUrl(path) {
+  const url = new URL(path, SNYK_API_URL);
+  if (!url.pathname.startsWith('/v1/')) {
+    throw new Error('Invalid Snyk API path');
+  }
+  return url.toString();
+}
+
 async function snykRequest(path, token) {
-  const response = await fetch(`${SNYK_API_URL}${path}`, {
+  const response = await fetch(buildSnykUrl(path), {
     headers: {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
@@ -34,14 +51,14 @@ async function snykRequest(path, token) {
 async function resolveOrgId(token) {
   const configured = process.env.SNYK_ORG_ID?.trim();
   if (configured) {
-    return configured;
+    return assertUuid(configured, 'SNYK_ORG_ID');
   }
 
   const orgs = await snykRequest('/v1/orgs', token);
   if (!orgs?.length) {
     throw new Error('No Snyk organizations found for token');
   }
-  return orgs[0].id;
+  return assertUuid(orgs[0].id, 'orgId');
 }
 
 async function resolveProjectId(orgId, token, repoName) {
@@ -56,7 +73,11 @@ async function resolveProjectId(orgId, token, repoName) {
     throw new Error(`Snyk project not found for repository "${repoName}"`);
   }
 
-  return match.id;
+  return assertUuid(match.id, 'projectId');
+}
+
+function createSafeEnv() {
+  return { ...process.env, PATH: SAFE_PATH };
 }
 
 function fetchFindingsViaCli(outputPath) {
@@ -64,7 +85,7 @@ function fetchFindingsViaCli(outputPath) {
   try {
     stdout = execSync('npx snyk test --json --severity-threshold=high', {
       encoding: 'utf8',
-      env: process.env,
+      env: createSafeEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -147,7 +168,9 @@ async function fetchSnykFindings() {
   console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
 }
 
-fetchSnykFindings().catch((error) => {
+try {
+  await fetchSnykFindings();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}
