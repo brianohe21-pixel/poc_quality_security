@@ -18,12 +18,6 @@ async function updateIssue() {
     `mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
       issueUpdate(id: $id, input: $input) {
         success
-        issue {
-          identifier
-          state {
-            name
-          }
-        }
       }
     }`,
     { id: issueId, input: { stateId } }
@@ -33,8 +27,7 @@ async function updateIssue() {
     throw new Error('Linear issueUpdate returned success=false');
   }
 
-  const issue = data.issueUpdate.issue;
-  console.log(`Updated Linear issue ${issue.identifier} to state "${issue.state.name}"`);
+  console.log('Updated Linear issue state successfully');
 
   if (comment) {
     await createComment(issueId, comment);
@@ -42,7 +35,9 @@ async function updateIssue() {
   }
 }
 
-updateIssue().catch((error) => {
+try {
+  await updateIssue();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}

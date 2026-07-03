@@ -9,12 +9,30 @@ function setGithubOutput(name, value) {
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
+const SNYK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validateSnykApiPath(path) {
+  if (!path.startsWith('/v1/') || path.includes('..')) {
+    throw new Error('Invalid Snyk API path');
+  }
+  const segments = path.split('/').filter(Boolean);
+  for (const segment of segments) {
+    if (segment !== 'v1' && segment !== 'orgs' && segment !== 'org' && segment !== 'projects' && segment !== 'project' && segment !== 'aggregated-issues') {
+      if (!SNYK_ID_PATTERN.test(segment)) {
+        throw new Error('Invalid Snyk API path segment');
+      }
+    }
+  }
+  return path;
+}
+
 async function snykRequest(path, token) {
-  const response = await fetch(`${SNYK_API_URL}${path}`, {
+  const safePath = validateSnykApiPath(path);
+  const response = await fetch(`${SNYK_API_URL}${safePath}`, {
     headers: {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
@@ -62,9 +80,10 @@ async function resolveProjectId(orgId, token, repoName) {
 function fetchFindingsViaCli(outputPath) {
   let stdout = '';
   try {
+    const safePath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
     stdout = execSync('npx snyk test --json --severity-threshold=high', {
       encoding: 'utf8',
-      env: process.env,
+      env: { ...process.env, PATH: safePath },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -147,7 +166,9 @@ async function fetchSnykFindings() {
   console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
 }
 
-fetchSnykFindings().catch((error) => {
+try {
+  await fetchSnykFindings();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}
