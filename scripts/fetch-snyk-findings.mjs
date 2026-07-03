@@ -3,9 +3,30 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { requiredEnv } from './lib/linear-client.mjs';
 
 const SNYK_API_URL = 'https://api.snyk.io';
+const SNYK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SNYK_API_PATH_PATTERN =
   /^\/v1\/(?:orgs|org\/[0-9a-f-]+\/(?:projects|project\/[0-9a-f-]+\/aggregated-issues))$/;
 const SAFE_PATH = '/usr/local/bin:/usr/bin:/bin';
+
+function validateSnykId(id, label) {
+  if (!SNYK_ID_PATTERN.test(id)) {
+    throw new Error(`Invalid Snyk ${label}`);
+  }
+  return id;
+}
+
+function buildOrgProjectsPath(orgId) {
+  return `/v1/org/${validateSnykId(orgId, 'organization ID')}/projects`;
+}
+
+function buildAggregatedIssuesPath(orgId, projectId) {
+  return `/v1/org/${validateSnykId(orgId, 'organization ID')}/project/${validateSnykId(projectId, 'project ID')}/aggregated-issues`;
+}
+
+function createSafeExecEnv() {
+  const { PATH: _ignoredPath, ...envWithoutPath } = process.env;
+  return { ...envWithoutPath, PATH: SAFE_PATH };
+}
 
 function setGithubOutput(name, value) {
   const outputFile = process.env.GITHUB_OUTPUT;
@@ -16,12 +37,13 @@ function setGithubOutput(name, value) {
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
-async function snykRequest(path, token) {
-  if (!SNYK_API_PATH_PATTERN.test(path)) {
+async function snykRequest(relativePath, token) {
+  const url = new URL(relativePath, SNYK_API_URL);
+  if (url.origin !== SNYK_API_URL || !SNYK_API_PATH_PATTERN.test(url.pathname)) {
     throw new Error('Invalid Snyk API path');
   }
 
-  const response = await fetch(`${SNYK_API_URL}${path}`, {
+  const response = await fetch(url, {
     headers: {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
@@ -41,18 +63,18 @@ async function snykRequest(path, token) {
 async function resolveOrgId(token) {
   const configured = process.env.SNYK_ORG_ID?.trim();
   if (configured) {
-    return configured;
+    return validateSnykId(configured, 'organization ID');
   }
 
   const orgs = await snykRequest('/v1/orgs', token);
   if (!orgs?.length) {
     throw new Error('No Snyk organizations found for token');
   }
-  return orgs[0].id;
+  return validateSnykId(orgs[0].id, 'organization ID');
 }
 
 async function resolveProjectId(orgId, token, repoName) {
-  const projects = await snykRequest(`/v1/org/${orgId}/projects`, token);
+  const projects = await snykRequest(buildOrgProjectsPath(orgId), token);
   const match = (projects.projects || []).find((project) => {
     const name = (project.name || '').toLowerCase();
     const remote = (project.remoteRepoUrl || '').toLowerCase();
@@ -63,7 +85,7 @@ async function resolveProjectId(orgId, token, repoName) {
     throw new Error(`Snyk project not found for repository "${repoName}"`);
   }
 
-  return match.id;
+  return validateSnykId(match.id, 'project ID');
 }
 
 function fetchFindingsViaCli(outputPath) {
@@ -71,7 +93,7 @@ function fetchFindingsViaCli(outputPath) {
   try {
     stdout = execSync('npx snyk test --json --severity-threshold=high', {
       encoding: 'utf8',
-      env: { ...process.env, PATH: SAFE_PATH },
+      env: createSafeExecEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -102,10 +124,7 @@ function fetchFindingsViaCli(outputPath) {
 async function fetchFindingsViaApi(token, repoName) {
   const orgId = await resolveOrgId(token);
   const projectId = await resolveProjectId(orgId, token, repoName);
-  const payload = await snykRequest(
-    `/v1/org/${orgId}/project/${projectId}/aggregated-issues`,
-    token
-  );
+  const payload = await snykRequest(buildAggregatedIssuesPath(orgId, projectId), token);
   const severities = new Set(['high', 'critical']);
 
   return (payload.issues || [])
