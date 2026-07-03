@@ -3,18 +3,28 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { requiredEnv } from './lib/linear-client.mjs';
 
 const SNYK_API_URL = 'https://api.snyk.io';
+const SNYK_PATH_PATTERN = /^\/v1(\/[a-z0-9-]+)*(\/[0-9a-f-]{36})*(\/[a-z-]+)*$/i;
+const SAFE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
 function setGithubOutput(name, value) {
   const outputFile = process.env.GITHUB_OUTPUT;
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
+function validateSnykPath(path) {
+  if (!SNYK_PATH_PATTERN.test(path)) {
+    throw new Error(`Invalid Snyk API path: ${path}`);
+  }
+  return path;
+}
+
 async function snykRequest(path, token) {
-  const response = await fetch(`${SNYK_API_URL}${path}`, {
+  const safePath = validateSnykPath(path);
+  const response = await fetch(`${SNYK_API_URL}${safePath}`, {
     headers: {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
@@ -59,12 +69,12 @@ async function resolveProjectId(orgId, token, repoName) {
   return match.id;
 }
 
-function fetchFindingsViaCli(outputPath) {
+function fetchFindingsViaCli() {
   let stdout = '';
   try {
     stdout = execSync('npx snyk test --json --severity-threshold=high', {
       encoding: 'utf8',
-      env: process.env,
+      env: { ...process.env, PATH: SAFE_PATH },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -132,7 +142,7 @@ async function fetchSnykFindings() {
   } catch (error) {
     if (error.status === 403 || /not entitled for api access/i.test(error.message)) {
       console.warn('Snyk API not available on current plan. Falling back to snyk test CLI.');
-      findings = fetchFindingsViaCli(outputPath);
+      findings = fetchFindingsViaCli();
       source = 'cli';
     } else {
       throw error;
@@ -147,7 +157,9 @@ async function fetchSnykFindings() {
   console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
 }
 
-fetchSnykFindings().catch((error) => {
+try {
+  await fetchSnykFindings();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}

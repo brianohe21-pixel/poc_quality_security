@@ -77,7 +77,9 @@ async function waitAndMergePr() {
   console.log(`PR #${prNumber} merged`);
 }
 
-waitAndMergePr().catch((error) => {
+try {
+  await waitAndMergePr();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}
