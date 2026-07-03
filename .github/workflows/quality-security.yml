@@ -3,9 +3,10 @@ name: Quality and Security
 on:
   push:
     branches:
-      - main
       - develop
   pull_request:
+    branches:
+      - develop
   workflow_dispatch:
 
 permissions:
@@ -15,6 +16,7 @@ permissions:
 env:
   SONAR_PROJECT_KEY: brianohe21-pixel_poc_quality_security
   SONAR_ORGANIZATION: brianohe21-pixel
+  REMEDIATION_BASE_REF: develop
 
 jobs:
   build_and_test:
@@ -95,7 +97,7 @@ jobs:
   linear-sonar-failure:
     name: Linear Issue on Sonar Failure
     needs: sonarcloud
-    if: failure() && !cancelled()
+    if: failure() && !cancelled() && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     outputs:
       issue_id: ${{ steps.create_issue.outputs.issue_id }}
@@ -125,7 +127,7 @@ jobs:
   linear-snyk-failure:
     name: Linear Issue on Snyk Failure
     needs: snyk
-    if: failure() && !cancelled()
+    if: failure() && !cancelled() && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     outputs:
       issue_id: ${{ steps.create_issue.outputs.issue_id }}
@@ -189,20 +191,13 @@ jobs:
           FINDINGS_OUTPUT: sonar-findings.json
         run: node scripts/fetch-sonar-findings.mjs
 
-      - name: Ensure develop branch exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git fetch origin main
-          git push --force origin main:develop
-
       - name: Run fix agent
         id: fix_agent
         timeout-minutes: 30
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           SOURCE: sonarcloud
-          REMEDIATION_BASE_REF: develop
+          REMEDIATION_BASE_REF: ${{ env.REMEDIATION_BASE_REF }}
           LINEAR_ISSUE_IDENTIFIER: ${{ needs.linear-sonar-failure.outputs.issue_identifier }}
           LINEAR_ISSUE_URL: ${{ needs.linear-sonar-failure.outputs.issue_url }}
           FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
@@ -305,20 +300,13 @@ jobs:
           FINDINGS_OUTPUT: sonar-findings.json
         run: node scripts/fetch-sonar-findings.mjs
 
-      - name: Ensure develop branch exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git fetch origin main
-          git push --force origin main:develop
-
       - name: Run fix agent
         id: fix_agent
         timeout-minutes: 30
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           SOURCE: snyk
-          REMEDIATION_BASE_REF: develop
+          REMEDIATION_BASE_REF: ${{ env.REMEDIATION_BASE_REF }}
           LINEAR_ISSUE_IDENTIFIER: ${{ needs.linear-snyk-failure.outputs.issue_identifier }}
           LINEAR_ISSUE_URL: ${{ needs.linear-snyk-failure.outputs.issue_url }}
           FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
