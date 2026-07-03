@@ -8,7 +8,7 @@ function setGithubOutput(name, value) {
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
@@ -162,6 +162,67 @@ function extractCloudResult(result, usedBaseRef) {
   };
 }
 
+function handleCloudAgentError(error, runtimeMode) {
+  const canFallback = runtimeMode === 'auto' && shouldFallbackToLocal(error);
+  if (!canFallback) {
+    if (error instanceof CursorAgentError) {
+      console.error(`Agent startup failed: ${error.message} (retryable=${error.isRetryable})`);
+      process.exit(1);
+    }
+    throw error;
+  }
+  console.warn('Cloud agent cannot access the repository. Falling back to local agent in CI.');
+}
+
+async function runCloudAgentWithFallback(options) {
+  const { apiKey, owner, repo, baseRef, prompt, issueIdentifier, source, runtimeMode } = options;
+  try {
+    const result = await runCloudAgent({ apiKey, owner, repo, baseRef, prompt });
+    if (result.status === 'error') {
+      throw new Error(`Cloud agent run failed: ${result.id}`);
+    }
+    const outcome = extractCloudResult(result, baseRef);
+    if (!outcome.prUrl && !outcome.branchName) {
+      throw new Error('Cloud agent completed without PR URL or branch name');
+    }
+    return outcome;
+  } catch (error) {
+    handleCloudAgentError(error, runtimeMode);
+    return runLocalAgentAndCreatePr({
+      apiKey,
+      owner,
+      repo,
+      baseRef,
+      prompt,
+      issueIdentifier,
+      source,
+    });
+  }
+}
+
+async function resolveAgentOutcome(options) {
+  if (options.runtimeMode === 'local') {
+    return runLocalAgentAndCreatePr(options);
+  }
+  return runCloudAgentWithFallback(options);
+}
+
+function writeAgentOutputs(outcome) {
+  setGithubOutput('agent_run_id', outcome.result.id || '');
+  setGithubOutput('pr_url', outcome.prUrl);
+  setGithubOutput('pr_number', outcome.prNumber);
+  setGithubOutput('branch_name', outcome.branchName);
+  setGithubOutput('base_ref', outcome.usedBaseRef);
+  setGithubOutput('agent_runtime', outcome.runtime);
+
+  console.log(
+    `Agent run ${outcome.result.id} completed via ${outcome.runtime} (base ref: ${outcome.usedBaseRef})`
+  );
+  if (outcome.prUrl) {
+    console.log(`Pull request: ${outcome.prUrl}`);
+  }
+}
+
 async function runFixAgent() {
   const apiKey = requiredEnv('CURSOR_API_KEY');
   const source = requiredEnv('SOURCE');
@@ -188,67 +249,23 @@ async function runFixAgent() {
     baseRef,
   });
 
-  let outcome;
+  const outcome = await resolveAgentOutcome({
+    apiKey,
+    owner,
+    repo,
+    baseRef,
+    prompt,
+    issueIdentifier,
+    source,
+    runtimeMode,
+  });
 
-  if (runtimeMode === 'local') {
-    outcome = await runLocalAgentAndCreatePr({
-      apiKey,
-      owner,
-      repo,
-      baseRef,
-      prompt,
-      issueIdentifier,
-      source,
-    });
-  } else {
-    try {
-      const result = await runCloudAgent({ apiKey, owner, repo, baseRef, prompt });
-      if (result.status === 'error') {
-        throw new Error(`Cloud agent run failed: ${result.id}`);
-      }
-      outcome = extractCloudResult(result, baseRef);
-      if (!outcome.prUrl && !outcome.branchName) {
-        throw new Error('Cloud agent completed without PR URL or branch name');
-      }
-    } catch (error) {
-      const canFallback = runtimeMode === 'auto' && shouldFallbackToLocal(error);
-      if (!canFallback) {
-        if (error instanceof CursorAgentError) {
-          console.error(`Agent startup failed: ${error.message} (retryable=${error.isRetryable})`);
-          process.exit(1);
-        }
-        throw error;
-      }
-
-      console.warn('Cloud agent cannot access the repository. Falling back to local agent in CI.');
-      outcome = await runLocalAgentAndCreatePr({
-        apiKey,
-        owner,
-        repo,
-        baseRef,
-        prompt,
-        issueIdentifier,
-        source,
-      });
-    }
-  }
-
-  setGithubOutput('agent_run_id', outcome.result.id || '');
-  setGithubOutput('pr_url', outcome.prUrl);
-  setGithubOutput('pr_number', outcome.prNumber);
-  setGithubOutput('branch_name', outcome.branchName);
-  setGithubOutput('base_ref', outcome.usedBaseRef);
-  setGithubOutput('agent_runtime', outcome.runtime);
-
-  console.log(
-    `Agent run ${outcome.result.id} completed via ${outcome.runtime} (base ref: ${outcome.usedBaseRef})`
-  );
-  if (outcome.prUrl) {
-    console.log(`Pull request: ${outcome.prUrl}`);
-  }
+  writeAgentOutputs(outcome);
 }
 
-runFixAgent().catch((error) => {
+try {
+  await runFixAgent();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}
