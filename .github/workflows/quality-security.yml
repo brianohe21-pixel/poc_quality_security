@@ -154,7 +154,7 @@ jobs:
   remediate-sonar:
     name: Remediate SonarCloud Findings
     needs: linear-sonar-failure
-    if: needs.linear-sonar-failure.result == 'success'
+    if: ${{ always() && needs.linear-sonar-failure.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -249,7 +249,7 @@ jobs:
   remediate-snyk:
     name: Remediate Snyk Findings
     needs: linear-snyk-failure
-    if: needs.linear-snyk-failure.result == 'success'
+    if: ${{ always() && needs.linear-snyk-failure.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
