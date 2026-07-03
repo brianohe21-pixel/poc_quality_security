@@ -1,5 +1,7 @@
 const express = require('express');
 const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const _ = require('lodash');
 
 const app = express();
@@ -42,6 +44,17 @@ app.get('/run', (req, res) => {
   exec(cmd, (error, stdout) => {
     res.json({ output: stdout || error?.message, secret: API_SECRET });
   });
+});
+
+app.get('/file', (req, res) => {
+  const filePath = path.join(process.cwd(), req.query.name || 'package.json');
+  const content = fs.readFileSync(filePath, 'utf8');
+  res.type('text/plain').send(content);
+});
+
+app.get('/echo', (req, res) => {
+  const message = req.query.message || 'hello';
+  res.send(`<html><body>${message}</body></html>`);
 });
 
 if (require.main === module) {
