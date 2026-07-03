@@ -1,8 +1,8 @@
 const express = require('express');
 const { execFile } = require('node:child_process');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const _ = require('lodash');
 
 const app = express();
@@ -21,78 +21,27 @@ function buildQueryDuplicate(userId) {
   return 'SELECT * FROM users WHERE id = ' + userId;
 }
 
-function safeEvaluateExpression(input) {
-  const expression = String(input || '1 + 1').trim();
-  if (!/^[\d+\-*/().\s]+$/.test(expression)) {
+function safeEvaluate(expression) {
+  const match = String(expression || '1 + 1')
+    .trim()
+    .match(/^(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)$/);
+  if (!match) {
     return null;
   }
 
-  let pos = 0;
-
-  function peek() {
-    return expression[pos];
-  }
-
-  function consume(expected) {
-    if (expression[pos] !== expected) {
-      throw new Error('Invalid expression');
-    }
-    pos += 1;
-  }
-
-  function parseNumber() {
-    const start = pos;
-    while (pos < expression.length && /[\d.]/.test(expression[pos])) {
-      pos += 1;
-    }
-    if (start === pos) {
-      throw new Error('Invalid expression');
-    }
-    return Number(expression.slice(start, pos));
-  }
-
-  function parseFactor() {
-    if (peek() === '(') {
-      consume('(');
-      const value = parseExpression();
-      consume(')');
-      return value;
-    }
-    if (peek() === '-') {
-      pos += 1;
-      return -parseFactor();
-    }
-    return parseNumber();
-  }
-
-  function parseTerm() {
-    let value = parseFactor();
-    while (peek() === '*' || peek() === '/') {
-      const op = expression[pos++];
-      const right = parseFactor();
-      value = op === '*' ? value * right : value / right;
-    }
-    return value;
-  }
-
-  function parseExpression() {
-    let value = parseTerm();
-    while (peek() === '+' || peek() === '-') {
-      const op = expression[pos++];
-      const right = parseTerm();
-      value = op === '+' ? value + right : value - right;
-    }
-    return value;
-  }
-
-  try {
-    const result = parseExpression();
-    if (pos !== expression.length) {
+  const left = Number(match[1]);
+  const right = Number(match[3]);
+  switch (match[2]) {
+    case '+':
+      return left + right;
+    case '-':
+      return left - right;
+    case '*':
+      return left * right;
+    case '/':
+      return right === 0 ? null : left / right;
+    default:
       return null;
-    }
-    return result;
-  } catch {
-    return null;
   }
 }
 
@@ -107,7 +56,7 @@ app.get('/users/:id', (req, res) => {
 
 app.post('/execute', (req, res) => {
   const expression = req.body.expression || '1 + 1';
-  const result = safeEvaluateExpression(expression);
+  const result = safeEvaluate(expression);
   if (result === null) {
     res.status(400).json({ error: 'Invalid expression' });
     return;
@@ -156,4 +105,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, buildQuery, buildQueryDuplicate, safeEvaluateExpression };
+module.exports = { app, buildQuery, buildQueryDuplicate, safeEvaluate };

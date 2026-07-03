@@ -143,7 +143,7 @@ export async function findLabelId(teamId, labelName) {
     const match = labels.find((label) => label.name.toLowerCase() === labelName.toLowerCase());
     return match?.id || null;
   } catch (error) {
-    console.warn(`Could not resolve label: ${error.message}`);
+    console.warn('Could not resolve label');
     return null;
   }
 }
