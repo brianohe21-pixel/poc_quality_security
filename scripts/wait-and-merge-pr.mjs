@@ -105,7 +105,9 @@ async function ensureMergeable(prNumber, repo, deadline) {
     }
 
     console.log(`PR #${prNumber} not mergeable (${state.mergeStateStatus}), updating branch from base...`);
-    run(`gh pr update-branch ${prNumber} --repo "${repo}" --rebase`);
+    run(
+      `gh api --method PUT repos/${repo}/pulls/${prNumber}/update-branch -f update_method=rebase`
+    );
     updates += 1;
     await waitForChecks(prNumber, repo, deadline);
   }
