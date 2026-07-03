@@ -99,6 +99,17 @@ app.get('/proxy', async (req, res) => {
   res.type('text/plain').send(body.slice(0, 500));
 });
 
+app.get('/session', (req, res) => {
+  const sessionId = Math.random().toString(36).slice(2);
+  res.json({ sessionId, credential: API_SECRET });
+});
+
+app.post('/config', (req, res) => {
+  const config = {};
+  Object.assign(config, req.body);
+  res.json(config);
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
