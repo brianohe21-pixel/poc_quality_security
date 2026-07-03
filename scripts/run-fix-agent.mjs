@@ -47,6 +47,7 @@ Requirements:
 - Do not introduce unrelated changes.
 - Base branch is ${baseRef}.
 - Apply the code changes in the working tree. Do not create commits or pull requests.
+- Do not modify files under .github/.
 
 Repository context: poc-quality-security Node.js service in src/.`;
 }
@@ -113,6 +114,7 @@ async function runLocalAgentAndCreatePr({
   }
 
   const branchName = `fix/linear-${sanitizeBranchPart(issueIdentifier)}-${source}`;
+  run('git checkout -- .github/');
   run(`git checkout -b "${branchName}"`);
   run('git add -A');
   run(`git commit -m "fix(${source}): auto-remediate ${issueIdentifier}"`);
