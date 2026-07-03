@@ -29,8 +29,19 @@ function run(command) {
   }).trim();
 }
 
-function buildPrompt({ source, issueIdentifier, issueUrl, findings, supplementaryFindings, baseRef }) {
+function formatFindingSummary(findings) {
+  return findings
+    .slice(0, 20)
+    .map(
+      (finding, index) =>
+        `${index + 1}. ${finding.component || 'unknown'}:${finding.line || '?'} - ${finding.message} (${finding.rule})`
+    )
+    .join('\n');
+}
+
+function buildPrompt({ source, issueIdentifier, issueUrl, findings, supplementaryFindings, baseRef, strict }) {
   const findingsJson = JSON.stringify(findings, null, 2);
+  const findingSummary = formatFindingSummary(findings);
   const sourceLabel = source === 'sonarcloud' ? 'SonarCloud code quality' : 'Snyk security';
   const supplementaryJson =
     supplementaryFindings?.length > 0
@@ -47,7 +58,18 @@ ${supplementaryJson}`
   const fixScope =
     supplementaryJson && source === 'snyk'
       ? '- Fix all Snyk and SonarCloud issues listed below.'
-      : '- Fix only the issues listed above.';
+      : '- Fix all listed findings in the primary section.';
+
+  const strictSection = strict
+    ? `
+
+IMPORTANT:
+- You MUST edit files in the working tree using write/edit tools.
+- Start with src/index.js and package.json.
+- Do not respond without applying code changes.
+- Fix at least these findings:
+${findingSummary}`
+    : '';
 
   return `You are fixing ${sourceLabel} findings for a Node.js Express project.
 
@@ -57,13 +79,16 @@ Linear URL: ${issueUrl}
 Primary findings (${sourceLabel}):
 ${findingsJson}${supplementarySection}
 
+Summary of findings to fix:
+${findingSummary}
+
 Requirements:
 ${fixScope}
 - Keep all existing tests passing (run npm test).
 - Do not introduce unrelated changes.
 - Base branch is ${baseRef}.
 - Apply the code changes in the working tree. Do not create commits or pull requests.
-- Do not modify files under .github/.
+- Do not modify files under .github/.${strictSection}
 
 Repository context: poc-quality-security Node.js service in src/.`;
 }
@@ -87,11 +112,43 @@ function shouldFallbackToLocal(error) {
   return /branch/i.test(error.message) && /exist|verify|not found/i.test(error.message);
 }
 
-function prepareGitBase(baseRef) {
+function prepareWorkingTree(baseRef) {
   run('git config user.name "github-actions[bot]"');
   run('git config user.email "github-actions[bot]@users.noreply.github.com"');
   run('git fetch origin');
+
+  const sha = process.env.GITHUB_SHA?.trim();
+  if (sha) {
+    console.log(`Checking out failing commit ${sha}`);
+    run(`git checkout --detach ${sha}`);
+    return;
+  }
+
+  console.log(`Checking out origin/${baseRef}`);
   run(`git checkout -B ${baseRef} origin/${baseRef}`);
+}
+
+function hasWorkingTreeChanges() {
+  return Boolean(run('git status --porcelain'));
+}
+
+async function runLocalAgentOnce({ apiKey, prompt }) {
+  const result = await Agent.prompt(prompt, {
+    apiKey,
+    model: { id: 'composer-2.5' },
+    mode: 'agent',
+    local: { cwd: process.cwd(), settingSources: [] },
+  });
+
+  if (result.status === 'error') {
+    throw new Error(`Local agent run failed: ${result.id}`);
+  }
+
+  if (result.result) {
+    console.log(`Agent summary: ${result.result.slice(0, 1000)}`);
+  }
+
+  return result;
 }
 
 function createPullRequest({ owner, repo, baseRef, branchName, issueIdentifier, source }) {
@@ -111,22 +168,41 @@ async function runLocalAgentAndCreatePr({
   prompt,
   issueIdentifier,
   source,
+  findings,
+  supplementaryFindings,
+  issueUrl,
 }) {
-  prepareGitBase(baseRef);
+  const maxAttempts = Number(process.env.LOCAL_AGENT_ATTEMPTS || 2);
+  let result;
 
-  const result = await Agent.prompt(prompt, {
-    apiKey,
-    model: { id: 'composer-2.5' },
-    local: { cwd: process.cwd(), settingSources: [] },
-  });
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    prepareWorkingTree(baseRef);
 
-  if (result.status === 'error') {
-    throw new Error(`Local agent run failed: ${result.id}`);
-  }
+    const attemptPrompt =
+      attempt === 1
+        ? prompt
+        : buildPrompt({
+            source,
+            issueIdentifier,
+            issueUrl,
+            findings,
+            supplementaryFindings,
+            baseRef,
+            strict: true,
+          });
 
-  const status = run('git status --porcelain');
-  if (!status) {
-    throw new Error('Local agent completed without file changes');
+    console.log(`Running local agent attempt ${attempt}/${maxAttempts}`);
+    result = await runLocalAgentOnce({ apiKey, prompt: attemptPrompt });
+
+    if (hasWorkingTreeChanges()) {
+      break;
+    }
+
+    if (attempt === maxAttempts) {
+      throw new Error('Local agent completed without file changes');
+    }
+
+    console.warn('Local agent made no file changes, retrying with stricter prompt');
   }
 
   const branchName = `fix/linear-${sanitizeBranchPart(issueIdentifier)}-${source}`;
@@ -190,14 +266,20 @@ function writeAgentOutputs(outcome) {
 }
 
 async function runCloudOrFallback(params) {
-  const { runtimeMode, apiKey, owner, repo, baseRef, prompt, issueIdentifier, source } = params;
+  const { runtimeMode, ...localParams } = params;
 
   try {
-    const result = await runCloudAgent({ apiKey, owner, repo, baseRef, prompt });
+    const result = await runCloudAgent({
+      apiKey: localParams.apiKey,
+      owner: localParams.owner,
+      repo: localParams.repo,
+      baseRef: localParams.baseRef,
+      prompt: localParams.prompt,
+    });
     if (result.status === 'error') {
       throw new Error(`Cloud agent run failed: ${result.id}`);
     }
-    const outcome = extractCloudResult(result, baseRef);
+    const outcome = extractCloudResult(result, localParams.baseRef);
     if (!outcome.prUrl && !outcome.branchName) {
       throw new Error('Cloud agent completed without PR URL or branch name');
     }
@@ -213,15 +295,7 @@ async function runCloudOrFallback(params) {
     }
 
     console.warn('Cloud agent cannot access the repository. Falling back to local agent in CI.');
-    return runLocalAgentAndCreatePr({
-      apiKey,
-      owner,
-      repo,
-      baseRef,
-      prompt,
-      issueIdentifier,
-      source,
-    });
+    return runLocalAgentAndCreatePr(localParams);
   }
 }
 
@@ -237,6 +311,12 @@ async function runFixAgent() {
   const [owner, repo] = repository.split('/');
 
   const { findings, supplementaryFindings } = loadFindingsContext(source, findingsPath);
+
+  if (!findings.length) {
+    throw new Error(`No findings found in ${findingsPath}`);
+  }
+
+  console.log(`Loaded ${findings.length} primary findings for remediation`);
   const prompt = buildPrompt({
     source,
     issueIdentifier,
@@ -244,6 +324,7 @@ async function runFixAgent() {
     findings,
     supplementaryFindings,
     baseRef,
+    strict: false,
   });
 
   const localParams = {
@@ -254,6 +335,9 @@ async function runFixAgent() {
     prompt,
     issueIdentifier,
     source,
+    findings,
+    supplementaryFindings,
+    issueUrl,
   };
 
   const outcome =
