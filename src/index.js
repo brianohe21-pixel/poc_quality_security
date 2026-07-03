@@ -1,5 +1,6 @@
 const express = require('express');
 const { exec } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const _ = require('lodash');
@@ -55,6 +56,19 @@ app.get('/file', (req, res) => {
 app.get('/echo', (req, res) => {
   const message = req.query.message || 'hello';
   res.send(`<html><body>${message}</body></html>`);
+});
+
+app.get('/hash', (req, res) => {
+  const password = req.query.password || 'test';
+  const hash = crypto.createHash('md5').update(password).digest('hex');
+  res.json({ hash });
+});
+
+app.get('/proxy', async (req, res) => {
+  const target = req.query.url || 'https://example.com';
+  const response = await fetch(target);
+  const body = await response.text();
+  res.type('text/plain').send(body.slice(0, 500));
 });
 
 if (require.main === module) {
