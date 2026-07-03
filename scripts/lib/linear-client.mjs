@@ -16,7 +16,7 @@ export function setGithubOutput(name, value) {
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
@@ -143,7 +143,7 @@ export async function findLabelId(teamId, labelName) {
     const match = labels.find((label) => label.name.toLowerCase() === labelName.toLowerCase());
     return match?.id || null;
   } catch (error) {
-    console.warn(`Could not resolve label "${labelName}": ${error.message}`);
+    console.warn('Could not resolve label');
     return null;
   }
 }
@@ -168,7 +168,7 @@ export async function getIssueTeamId(issueId) {
 }
 
 export async function resolveWorkflowStateId(teamId, stateName) {
-  const overrideId = process.env[`LINEAR_STATE_${stateName.toUpperCase().replace(/\s+/g, '_')}_ID`]?.trim();
+  const overrideId = process.env[`LINEAR_STATE_${stateName.toUpperCase().replaceAll(/\s+/g, '_')}_ID`]?.trim();
   if (overrideId) {
     return overrideId;
   }
