@@ -11,6 +11,13 @@ const RUN_OUTPUT = 'poc';
 const unusedConfig = { debug: true, retries: 3 };
 const ALLOWED_PROXY_HOSTS = new Set(['example.com', 'www.example.com']);
 
+const ARITHMETIC_OPERATIONS = {
+  '+': (left, right) => left + right,
+  '-': (left, right) => left - right,
+  '*': (left, right) => left * right,
+  '/': (left, right) => (right === 0 ? null : left / right),
+};
+
 app.use(express.json());
 
 function escapeHtml(value) {
@@ -31,6 +38,14 @@ function resolveSafeFilePath(name) {
   return resolved;
 }
 
+function resolveSafeRedirect(target) {
+  const value = String(target || '/health').trim();
+  if (value.startsWith('/') && !value.startsWith('//')) {
+    return value;
+  }
+  return '/health';
+}
+
 function buildQuery(userId) {
   return 'SELECT * FROM users WHERE id = ' + userId;
 }
@@ -49,18 +64,15 @@ function safeEvaluate(expression) {
 
   const left = Number(match[1]);
   const right = Number(match[3]);
-  switch (match[2]) {
-    case '+':
-      return left + right;
-    case '-':
-      return left - right;
-    case '*':
-      return left * right;
-    case '/':
-      return right === 0 ? null : left / right;
-    default:
-      return null;
+  const operation = ARITHMETIC_OPERATIONS[match[2]];
+  if (!operation) {
+    return null;
   }
+  return operation(left, right);
+}
+
+function getRunOutput() {
+  return RUN_OUTPUT;
 }
 
 app.get('/health', (req, res) => {
@@ -88,7 +100,7 @@ app.get('/merge', (req, res) => {
 });
 
 app.get('/run', (req, res) => {
-  res.json({ output: RUN_OUTPUT });
+  res.json({ output: getRunOutput() });
 });
 
 app.get('/file', (req, res) => {
@@ -134,12 +146,12 @@ app.post('/config', (req, res) => {
 });
 
 app.get('/redirect', (req, res) => {
-  res.redirect(req.query.url || '/health');
+  res.redirect(resolveSafeRedirect(req.query.url));
 });
 
 app.get('/debug', (req, res) => {
-  const payload = req.query.payload || 'ping';
-  console.log(`debug request: ${payload}`);
+  const payload = String(req.query.payload || 'ping').replaceAll(/[\r\n]/g, '');
+  console.log('debug request received');
   res.json({ received: payload });
 });
 
@@ -149,4 +161,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, buildQuery, buildQueryDuplicate, safeEvaluate, RUN_OUTPUT };
+module.exports = { app, buildQuery, buildQueryDuplicate, safeEvaluate, getRunOutput, RUN_OUTPUT };
