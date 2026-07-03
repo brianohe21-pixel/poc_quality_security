@@ -6,7 +6,7 @@ async function disableSonarAutoscan() {
   const token = requiredEnv('SONAR_TOKEN');
 
   const params = new URLSearchParams({
-    project: projectKey,
+    projectKey,
     organization,
     enable: 'false',
   });

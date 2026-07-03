@@ -14,7 +14,7 @@ function run(command, options = {}) {
     })?.trim();
   } catch (error) {
     if (options.ignoreError) {
-      return '';
+      return `${error.stdout?.toString?.() || ''}${error.stderr?.toString?.() || ''}`.trim();
     }
     error.stdout = error.stdout?.toString?.() || '';
     error.stderr = error.stderr?.toString?.() || '';
