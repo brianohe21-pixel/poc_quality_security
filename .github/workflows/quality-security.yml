@@ -6,6 +6,7 @@ on:
       - main
       - develop
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -160,6 +161,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -204,6 +207,8 @@ jobs:
           LINEAR_ISSUE_URL: ${{ needs.linear-sonar-failure.outputs.issue_url }}
           FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          CURSOR_AGENT_RUNTIME: auto
         run: node scripts/run-fix-agent.mjs
 
       - name: Resolve PR number
@@ -263,6 +268,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -308,6 +315,8 @@ jobs:
           LINEAR_ISSUE_URL: ${{ needs.linear-snyk-failure.outputs.issue_url }}
           FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          CURSOR_AGENT_RUNTIME: auto
         run: node scripts/run-fix-agent.mjs
 
       - name: Resolve PR number

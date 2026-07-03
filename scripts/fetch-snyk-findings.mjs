@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { requiredEnv } from './lib/linear-client.mjs';
 
@@ -22,7 +23,9 @@ async function snykRequest(path, token) {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Snyk API HTTP ${response.status}: ${body}`);
+    const error = new Error(`Snyk API HTTP ${response.status}: ${body}`);
+    error.status = response.status;
+    throw error;
   }
 
   return response.json();
@@ -56,20 +59,49 @@ async function resolveProjectId(orgId, token, repoName) {
   return match.id;
 }
 
-async function fetchSnykFindings() {
-  const token = requiredEnv('SNYK_TOKEN');
-  const repoName = requiredEnv('GITHUB_REPOSITORY').split('/')[1];
-  const outputPath = process.env.FINDINGS_OUTPUT || 'findings.json';
-  const severities = new Set(['high', 'critical']);
+function fetchFindingsViaCli(outputPath) {
+  let stdout = '';
+  try {
+    stdout = execSync('npx snyk test --json --severity-threshold=high', {
+      encoding: 'utf8',
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const output = error.stdout?.toString() || '';
+    if (output.trim().startsWith('{')) {
+      stdout = output;
+    } else {
+      throw error;
+    }
+  }
 
+  const payload = JSON.parse(stdout);
+  const vulnerabilities = payload.vulnerabilities || [];
+
+  return vulnerabilities.map((issue) => ({
+    id: issue.id,
+    title: issue.title,
+    severity: issue.severity,
+    packageName: issue.packageName,
+    version: issue.version,
+    identifiers: issue.identifiers,
+    upgradePath: issue.upgradePath,
+    from: issue.from,
+    url: issue.url,
+  }));
+}
+
+async function fetchFindingsViaApi(token, repoName) {
   const orgId = await resolveOrgId(token);
   const projectId = await resolveProjectId(orgId, token, repoName);
   const payload = await snykRequest(
     `/v1/org/${orgId}/project/${projectId}/aggregated-issues`,
     token
   );
+  const severities = new Set(['high', 'critical']);
 
-  const findings = (payload.issues || [])
+  return (payload.issues || [])
     .filter((entry) => severities.has((entry.issueData?.severity || '').toLowerCase()))
     .map((entry) => {
       const issue = entry.issueData || {};
@@ -85,12 +117,34 @@ async function fetchSnykFindings() {
         url: issue.url,
       };
     });
+}
+
+async function fetchSnykFindings() {
+  const token = requiredEnv('SNYK_TOKEN');
+  const repoName = requiredEnv('GITHUB_REPOSITORY').split('/')[1];
+  const outputPath = process.env.FINDINGS_OUTPUT || 'findings.json';
+
+  let findings;
+  let source = 'api';
+
+  try {
+    findings = await fetchFindingsViaApi(token, repoName);
+  } catch (error) {
+    if (error.status === 403 || /not entitled for api access/i.test(error.message)) {
+      console.warn('Snyk API not available on current plan. Falling back to snyk test CLI.');
+      findings = fetchFindingsViaCli(outputPath);
+      source = 'cli';
+    } else {
+      throw error;
+    }
+  }
 
   writeFileSync(outputPath, JSON.stringify(findings, null, 2));
   setGithubOutput('findings_path', outputPath);
   setGithubOutput('findings_count', String(findings.length));
+  setGithubOutput('findings_source', source);
 
-  console.log(`Fetched ${findings.length} Snyk findings to ${outputPath}`);
+  console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
 }
 
 fetchSnykFindings().catch((error) => {
