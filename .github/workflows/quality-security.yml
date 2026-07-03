@@ -3,16 +3,20 @@ name: Quality and Security
 on:
   push:
     branches:
-      - main
+      - develop
   pull_request:
+    branches:
+      - develop
+  workflow_dispatch:
 
 permissions:
-  contents: read
-  pull-requests: read
+  contents: write
+  pull-requests: write
 
 env:
   SONAR_PROJECT_KEY: brianohe21-pixel_poc_quality_security
   SONAR_ORGANIZATION: brianohe21-pixel
+  REMEDIATION_BASE_REF: develop
 
 jobs:
   build_and_test:
@@ -52,6 +56,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Disable SonarCloud automatic analysis
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ env.SONAR_ORGANIZATION }}
+        run: node scripts/disable-sonar-autoscan.mjs
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
@@ -93,13 +104,18 @@ jobs:
   linear-sonar-failure:
     name: Linear Issue on Sonar Failure
     needs: sonarcloud
-    if: failure() && !cancelled()
+    if: failure() && !cancelled() && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
+    outputs:
+      issue_id: ${{ steps.create_issue.outputs.issue_id }}
+      issue_identifier: ${{ steps.create_issue.outputs.issue_identifier }}
+      issue_url: ${{ steps.create_issue.outputs.issue_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Create Linear issue
+        id: create_issue
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
@@ -118,13 +134,18 @@ jobs:
   linear-snyk-failure:
     name: Linear Issue on Snyk Failure
     needs: snyk
-    if: failure() && !cancelled()
+    if: failure() && !cancelled() && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
+    outputs:
+      issue_id: ${{ steps.create_issue.outputs.issue_id }}
+      issue_identifier: ${{ steps.create_issue.outputs.issue_identifier }}
+      issue_url: ${{ steps.create_issue.outputs.issue_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Create Linear issue
+        id: create_issue
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
@@ -139,3 +160,214 @@ jobs:
           LABEL: snyk
           PRIORITY: 1
         run: node scripts/create-linear-issue.mjs
+
+  remediate-sonar:
+    name: Remediate SonarCloud Findings
+    needs: linear-sonar-failure
+    if: ${{ always() && needs.linear-sonar-failure.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Mark Linear issue in progress
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_ISSUE_ID: ${{ needs.linear-sonar-failure.outputs.issue_id }}
+          STATE: in_progress
+          COMMENT: Auto-fix agent started for SonarCloud findings.
+        run: node scripts/update-linear-issue.mjs
+
+      - name: Fetch SonarCloud findings
+        id: fetch_findings
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+          FINDINGS_OUTPUT: sonar-findings.json
+        run: node scripts/fetch-sonar-findings.mjs
+
+      - name: Run fix agent
+        id: fix_agent
+        timeout-minutes: 30
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          SOURCE: sonarcloud
+          REMEDIATION_BASE_REF: ${{ env.REMEDIATION_BASE_REF }}
+          LINEAR_ISSUE_IDENTIFIER: ${{ needs.linear-sonar-failure.outputs.issue_identifier }}
+          LINEAR_ISSUE_URL: ${{ needs.linear-sonar-failure.outputs.issue_url }}
+          FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          CURSOR_AGENT_RUNTIME: auto
+        run: node scripts/run-fix-agent.mjs
+
+      - name: Resolve PR number
+        id: resolve_pr
+        env:
+          PR_NUMBER: ${{ steps.fix_agent.outputs.pr_number }}
+          BRANCH_NAME: ${{ steps.fix_agent.outputs.branch_name }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          elif [ -n "$BRANCH_NAME" ]; then
+            PR=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH_NAME" --json number --jq '.[0].number')
+            if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+              echo "Could not resolve PR for branch $BRANCH_NAME"
+              exit 1
+            fi
+            echo "pr_number=$PR" >> "$GITHUB_OUTPUT"
+          else
+            echo "No PR number or branch name from fix agent"
+            exit 1
+          fi
+
+      - name: Wait for CI and merge PR
+        env:
+          PR_NUMBER: ${{ steps.resolve_pr.outputs.pr_number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          REMEDIATION_SOURCE: sonarcloud
+        run: node scripts/wait-and-merge-pr.mjs
+
+      - name: Mark Linear issue done
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_ISSUE_ID: ${{ needs.linear-sonar-failure.outputs.issue_id }}
+          STATE: done
+          COMMENT: |
+            Auto-fix completed and merged to develop.
+            PR: ${{ steps.fix_agent.outputs.pr_url }}
+            Agent run: ${{ steps.fix_agent.outputs.agent_run_id }}
+        run: node scripts/update-linear-issue.mjs
+
+      - name: Mark Linear issue on failure
+        if: failure()
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_ISSUE_ID: ${{ needs.linear-sonar-failure.outputs.issue_id }}
+          STATE: failed
+          COMMENT: |
+            Auto-fix failed. See workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/update-linear-issue.mjs
+
+  remediate-snyk:
+    name: Remediate Snyk Findings
+    needs: linear-snyk-failure
+    if: ${{ always() && needs.linear-snyk-failure.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Mark Linear issue in progress
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_ISSUE_ID: ${{ needs.linear-snyk-failure.outputs.issue_id }}
+          STATE: in_progress
+          COMMENT: Auto-fix agent started for Snyk vulnerabilities.
+        run: node scripts/update-linear-issue.mjs
+
+      - name: Fetch Snyk findings
+        id: fetch_findings
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_ORG_ID: ${{ vars.SNYK_ORG_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          FINDINGS_OUTPUT: snyk-findings.json
+        run: node scripts/fetch-snyk-findings.mjs
+
+      - name: Fetch SonarCloud findings
+        id: fetch_sonar_findings
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+          FINDINGS_OUTPUT: sonar-findings.json
+        run: node scripts/fetch-sonar-findings.mjs
+
+      - name: Run fix agent
+        id: fix_agent
+        timeout-minutes: 30
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          SOURCE: snyk
+          REMEDIATION_BASE_REF: ${{ env.REMEDIATION_BASE_REF }}
+          LINEAR_ISSUE_IDENTIFIER: ${{ needs.linear-snyk-failure.outputs.issue_identifier }}
+          LINEAR_ISSUE_URL: ${{ needs.linear-snyk-failure.outputs.issue_url }}
+          FINDINGS_PATH: ${{ steps.fetch_findings.outputs.findings_path }}
+          SONAR_FINDINGS_PATH: ${{ steps.fetch_sonar_findings.outputs.findings_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          CURSOR_AGENT_RUNTIME: auto
+        run: node scripts/run-fix-agent.mjs
+
+      - name: Resolve PR number
+        id: resolve_pr
+        env:
+          PR_NUMBER: ${{ steps.fix_agent.outputs.pr_number }}
+          BRANCH_NAME: ${{ steps.fix_agent.outputs.branch_name }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          elif [ -n "$BRANCH_NAME" ]; then
+            PR=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH_NAME" --json number --jq '.[0].number')
+            if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+              echo "Could not resolve PR for branch $BRANCH_NAME"
+              exit 1
+            fi
+            echo "pr_number=$PR" >> "$GITHUB_OUTPUT"
+          else
+            echo "No PR number or branch name from fix agent"
+            exit 1
+          fi
+
+      - name: Wait for CI and merge PR
+        env:
+          PR_NUMBER: ${{ steps.resolve_pr.outputs.pr_number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/wait-and-merge-pr.mjs
+
+      - name: Mark Linear issue done
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_ISSUE_ID: ${{ needs.linear-snyk-failure.outputs.issue_id }}
+          STATE: done
+          COMMENT: |
+            Auto-fix completed and merged to develop.
+            PR: ${{ steps.fix_agent.outputs.pr_url }}
+            Agent run: ${{ steps.fix_agent.outputs.agent_run_id }}
+        run: node scripts/update-linear-issue.mjs
+
+      - name: Mark Linear issue on failure
+        if: failure()
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_ISSUE_ID: ${{ needs.linear-snyk-failure.outputs.issue_id }}
+          STATE: failed
+          COMMENT: |
+            Auto-fix failed. See workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/update-linear-issue.mjs
