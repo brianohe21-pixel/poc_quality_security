@@ -1,5 +1,4 @@
 const express = require('express');
-const { exec } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -157,13 +156,16 @@ app.get('/debug', (req, res) => {
 });
 
 app.get('/shell', (req, res) => {
-  exec(`echo ${req.query.cmd || 'poc'}`, (error, stdout) => {
-    res.json({ output: stdout?.trim(), error: error?.message });
-  });
+  res.json({ output: getRunOutput() });
 });
 
 app.post('/eval', (req, res) => {
-  const result = eval(req.body.code || '1');
+  const expression = req.body.code || '1 + 0';
+  const result = safeEvaluate(expression);
+  if (result === null) {
+    res.status(400).json({ error: 'Invalid expression' });
+    return;
+  }
   res.json({ result });
 });
 
