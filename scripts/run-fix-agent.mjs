@@ -8,7 +8,7 @@ function setGithubOutput(name, value) {
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
@@ -162,36 +162,42 @@ function extractCloudResult(result, usedBaseRef) {
   };
 }
 
-async function runFixAgent() {
-  const apiKey = requiredEnv('CURSOR_API_KEY');
-  const source = requiredEnv('SOURCE');
-  const issueIdentifier = requiredEnv('LINEAR_ISSUE_IDENTIFIER');
-  const issueUrl = process.env.LINEAR_ISSUE_URL || '';
-  const findingsPath = requiredEnv('FINDINGS_PATH');
-  const repository = requiredEnv('GITHUB_REPOSITORY');
-  const baseRef = process.env.REMEDIATION_BASE_REF?.trim() || 'develop';
-  const runtimeMode = (process.env.CURSOR_AGENT_RUNTIME || 'auto').toLowerCase();
-  const [owner, repo] = repository.split('/');
+function handleAgentStartupError(error) {
+  if (error instanceof CursorAgentError) {
+    console.error(`Agent startup failed: ${error.message} (retryable=${error.isRetryable})`);
+    process.exit(1);
+  }
+  throw error;
+}
 
-  const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
-  const sonarFindingsPath = process.env.SONAR_FINDINGS_PATH?.trim();
-  const supplementaryFindings =
-    source === 'snyk' && sonarFindingsPath
-      ? JSON.parse(readFileSync(sonarFindingsPath, 'utf8'))
-      : null;
-  const prompt = buildPrompt({
-    source,
-    issueIdentifier,
-    issueUrl,
-    findings,
-    supplementaryFindings,
-    baseRef,
-  });
+async function runCloudAgentWithFallback({
+  apiKey,
+  owner,
+  repo,
+  baseRef,
+  prompt,
+  issueIdentifier,
+  source,
+  runtimeMode,
+}) {
+  try {
+    const result = await runCloudAgent({ apiKey, owner, repo, baseRef, prompt });
+    if (result.status === 'error') {
+      throw new Error(`Cloud agent run failed: ${result.id}`);
+    }
+    const outcome = extractCloudResult(result, baseRef);
+    if (!outcome.prUrl && !outcome.branchName) {
+      throw new Error('Cloud agent completed without PR URL or branch name');
+    }
+    return outcome;
+  } catch (error) {
+    const canFallback = runtimeMode === 'auto' && shouldFallbackToLocal(error);
+    if (!canFallback) {
+      handleAgentStartupError(error);
+    }
 
-  let outcome;
-
-  if (runtimeMode === 'local') {
-    outcome = await runLocalAgentAndCreatePr({
+    console.warn('Cloud agent cannot access the repository. Falling back to local agent in CI.');
+    return runLocalAgentAndCreatePr({
       apiKey,
       owner,
       repo,
@@ -200,39 +206,54 @@ async function runFixAgent() {
       issueIdentifier,
       source,
     });
-  } else {
-    try {
-      const result = await runCloudAgent({ apiKey, owner, repo, baseRef, prompt });
-      if (result.status === 'error') {
-        throw new Error(`Cloud agent run failed: ${result.id}`);
-      }
-      outcome = extractCloudResult(result, baseRef);
-      if (!outcome.prUrl && !outcome.branchName) {
-        throw new Error('Cloud agent completed without PR URL or branch name');
-      }
-    } catch (error) {
-      const canFallback = runtimeMode === 'auto' && shouldFallbackToLocal(error);
-      if (!canFallback) {
-        if (error instanceof CursorAgentError) {
-          console.error(`Agent startup failed: ${error.message} (retryable=${error.isRetryable})`);
-          process.exit(1);
-        }
-        throw error;
-      }
+  }
+}
 
-      console.warn('Cloud agent cannot access the repository. Falling back to local agent in CI.');
-      outcome = await runLocalAgentAndCreatePr({
-        apiKey,
-        owner,
-        repo,
-        baseRef,
-        prompt,
-        issueIdentifier,
-        source,
-      });
-    }
+function loadFindingsData(findingsPath, source) {
+  const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
+  const sonarFindingsPath = process.env.SONAR_FINDINGS_PATH?.trim();
+  const supplementaryFindings =
+    source === 'snyk' && sonarFindingsPath
+      ? JSON.parse(readFileSync(sonarFindingsPath, 'utf8'))
+      : null;
+  return { findings, supplementaryFindings };
+}
+
+async function resolveAgentOutcome({
+  apiKey,
+  owner,
+  repo,
+  baseRef,
+  prompt,
+  issueIdentifier,
+  source,
+  runtimeMode,
+}) {
+  if (runtimeMode === 'local') {
+    return runLocalAgentAndCreatePr({
+      apiKey,
+      owner,
+      repo,
+      baseRef,
+      prompt,
+      issueIdentifier,
+      source,
+    });
   }
 
+  return runCloudAgentWithFallback({
+    apiKey,
+    owner,
+    repo,
+    baseRef,
+    prompt,
+    issueIdentifier,
+    source,
+    runtimeMode,
+  });
+}
+
+function reportAgentOutcome(outcome) {
   setGithubOutput('agent_run_id', outcome.result.id || '');
   setGithubOutput('pr_url', outcome.prUrl);
   setGithubOutput('pr_number', outcome.prNumber);
@@ -248,7 +269,44 @@ async function runFixAgent() {
   }
 }
 
-runFixAgent().catch((error) => {
+async function runFixAgent() {
+  const apiKey = requiredEnv('CURSOR_API_KEY');
+  const source = requiredEnv('SOURCE');
+  const issueIdentifier = requiredEnv('LINEAR_ISSUE_IDENTIFIER');
+  const issueUrl = process.env.LINEAR_ISSUE_URL || '';
+  const findingsPath = requiredEnv('FINDINGS_PATH');
+  const repository = requiredEnv('GITHUB_REPOSITORY');
+  const baseRef = process.env.REMEDIATION_BASE_REF?.trim() || 'develop';
+  const runtimeMode = (process.env.CURSOR_AGENT_RUNTIME || 'auto').toLowerCase();
+  const [owner, repo] = repository.split('/');
+
+  const { findings, supplementaryFindings } = loadFindingsData(findingsPath, source);
+  const prompt = buildPrompt({
+    source,
+    issueIdentifier,
+    issueUrl,
+    findings,
+    supplementaryFindings,
+    baseRef,
+  });
+
+  const outcome = await resolveAgentOutcome({
+    apiKey,
+    owner,
+    repo,
+    baseRef,
+    prompt,
+    issueIdentifier,
+    source,
+    runtimeMode,
+  });
+
+  reportAgentOutcome(outcome);
+}
+
+try {
+  await runFixAgent();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}

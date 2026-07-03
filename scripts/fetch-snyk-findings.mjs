@@ -1,20 +1,49 @@
 import { execSync } from 'node:child_process';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { requiredEnv } from './lib/linear-client.mjs';
 
 const SNYK_API_URL = 'https://api.snyk.io';
+const SNYK_ID_PATTERN = /^[a-f0-9-]+$/i;
 
 function setGithubOutput(name, value) {
   const outputFile = process.env.GITHUB_OUTPUT;
   if (!outputFile) {
     return;
   }
-  const sanitized = String(value ?? '').replace(/\n/g, '%0A');
+  const sanitized = String(value ?? '').replaceAll('\n', '%0A');
   appendFileSync(outputFile, `${name}=${sanitized}\n`);
 }
 
+function assertSnykId(value, label) {
+  if (!SNYK_ID_PATTERN.test(value)) {
+    throw new Error(`Invalid Snyk ${label}`);
+  }
+}
+
+function buildSnykApiUrl(path) {
+  const url = new URL(path, SNYK_API_URL);
+  if (url.origin !== SNYK_API_URL) {
+    throw new Error('Invalid Snyk API URL');
+  }
+  return url;
+}
+
+function buildSafePath() {
+  const candidates = [
+    dirname(process.execPath),
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/local/sbin',
+    '/usr/sbin',
+    '/sbin',
+  ];
+  return [...new Set(candidates.filter((dir) => existsSync(dir)))].join(':');
+}
+
 async function snykRequest(path, token) {
-  const response = await fetch(`${SNYK_API_URL}${path}`, {
+  const response = await fetch(buildSnykApiUrl(path), {
     headers: {
       Authorization: `token ${token}`,
       'Content-Type': 'application/json',
@@ -34,6 +63,7 @@ async function snykRequest(path, token) {
 async function resolveOrgId(token) {
   const configured = process.env.SNYK_ORG_ID?.trim();
   if (configured) {
+    assertSnykId(configured, 'organization id');
     return configured;
   }
 
@@ -45,6 +75,7 @@ async function resolveOrgId(token) {
 }
 
 async function resolveProjectId(orgId, token, repoName) {
+  assertSnykId(orgId, 'organization id');
   const projects = await snykRequest(`/v1/org/${orgId}/projects`, token);
   const match = (projects.projects || []).find((project) => {
     const name = (project.name || '').toLowerCase();
@@ -56,6 +87,7 @@ async function resolveProjectId(orgId, token, repoName) {
     throw new Error(`Snyk project not found for repository "${repoName}"`);
   }
 
+  assertSnykId(match.id, 'project id');
   return match.id;
 }
 
@@ -64,7 +96,7 @@ function fetchFindingsViaCli(outputPath) {
   try {
     stdout = execSync('npx snyk test --json --severity-threshold=high', {
       encoding: 'utf8',
-      env: process.env,
+      env: { ...process.env, PATH: buildSafePath() },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -147,7 +179,9 @@ async function fetchSnykFindings() {
   console.log(`Fetched ${findings.length} Snyk findings via ${source} to ${outputPath}`);
 }
 
-fetchSnykFindings().catch((error) => {
+try {
+  await fetchSnykFindings();
+} catch (error) {
   console.error(error.message);
   process.exit(1);
-});
+}
