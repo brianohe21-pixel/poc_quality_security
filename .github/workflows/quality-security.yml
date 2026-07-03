@@ -194,7 +194,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           git fetch origin main
-          git push origin "origin/main:refs/heads/develop"
+          git push --force origin main:develop
 
       - name: Run fix agent
         id: fix_agent
@@ -302,7 +302,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           git fetch origin main
-          git push origin "origin/main:refs/heads/develop"
+          git push --force origin main:develop
 
       - name: Run fix agent
         id: fix_agent
