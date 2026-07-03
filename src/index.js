@@ -5,7 +5,9 @@ const path = require('node:path');
 
 const app = express();
 app.disable('x-powered-by');
+
 const PORT = process.env.PORT || 3000;
+const RUN_OUTPUT = 'poc';
 const unusedConfig = { debug: true, retries: 3 };
 const ALLOWED_PROXY_HOSTS = new Set(['example.com', 'www.example.com']);
 
@@ -86,7 +88,7 @@ app.get('/merge', (req, res) => {
 });
 
 app.get('/run', (req, res) => {
-  res.json({ output: 'poc' });
+  res.json({ output: RUN_OUTPUT });
 });
 
 app.get('/file', (req, res) => {
@@ -137,4 +139,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, buildQuery, buildQueryDuplicate, safeEvaluate };
+module.exports = { app, buildQuery, buildQueryDuplicate, safeEvaluate, RUN_OUTPUT };
